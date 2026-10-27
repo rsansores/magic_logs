@@ -91,6 +91,7 @@ pub struct Cursor {
 /// One bar of the histogram: the rows of `level` in the bucket that begins
 /// at `bucket`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Bucket {
     pub bucket: DateTime<Utc>,
     pub level: Option<String>,
@@ -99,6 +100,7 @@ pub struct Bucket {
 
 /// How many rows hold `value` in `field`, under every other field's filter.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct FacetCount {
     pub field: String,
     pub value: Option<String>,
@@ -108,6 +110,7 @@ pub struct FacetCount {
 /// One `top` and one value of the grouped field: how many rows, the first
 /// and the last.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Group {
     pub top: Option<String>,
     pub value: Option<String>,
@@ -379,5 +382,44 @@ fn step_interval(step: Duration) -> sqlx::postgres::types::PgInterval {
         months: 0,
         days: 0,
         microseconds: step.num_microseconds().unwrap_or(i64::MAX),
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod json {
+    use super::*;
+    use chrono::TimeZone;
+
+    /// The names `magic_logs_explorer`'s `BucketRow`, `FacetCountRow` and
+    /// `GroupRow` read.
+    #[test]
+    fn the_answers_read_as_the_explorer_types_them() {
+        let at = Utc.with_ymd_and_hms(2026, 10, 1, 6, 0, 0).unwrap();
+        let bucket = Bucket {
+            bucket: at,
+            level: Some("warning".into()),
+            count: 3,
+        };
+        let facet = FacetCount {
+            field: "kind".into(),
+            value: None,
+            count: 2,
+        };
+        let group = Group {
+            top: Some("u1".into()),
+            value: Some("door".into()),
+            count: 5,
+            first_at: Some(at),
+            last_at: None,
+        };
+        assert_eq!(
+            serde_json::to_value((bucket, facet, group)).unwrap(),
+            serde_json::json!([
+                { "bucket": "2026-10-01T06:00:00Z", "level": "warning", "count": 3 },
+                { "field": "kind", "value": null, "count": 2 },
+                { "top": "u1", "value": "door", "count": 5,
+                  "first_at": "2026-10-01T06:00:00Z", "last_at": null }
+            ])
+        );
     }
 }

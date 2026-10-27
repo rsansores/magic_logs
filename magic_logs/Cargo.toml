@@ -14,10 +14,16 @@ readme = "../README.md"
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 magic_logs_derive = { version = "=0.1.0", path = "../magic_logs_derive" }
+serde = { version = "1", features = ["derive"], optional = true }
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "chrono", "uuid"] }
 thiserror = "2"
 uuid = "1"
 
+[features]
+# `Serialize` on the answers' rows, as `magic_logs_explorer` reads them.
+serde = ["dep:serde", "chrono/serde"]
+
 [dev-dependencies]
+serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "macros", "migrate", "chrono", "uuid", "derive"] }
 tokio = { version = "1", features = ["macros", "rt"] }

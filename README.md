@@ -38,7 +38,16 @@ pub struct Event {
   last row, from the counts per day and `top`.
 
 Each returns a `sqlx::QueryBuilder` for the host to run on its own
-transaction, which is where its row-level settings live.
+transaction, which is where its row-level settings live. With the `serde`
+feature, their rows serialize as the explorer reads them.
+
+## The explorer
+
+[`magic_logs_explorer`](explorer/) is the Vue 3 side, without its looks:
+the window, the facets, the histogram's geometry and its brush, the pages —
+state in your URL, drawn by your own components.
+
+![The explorer's demo](https://raw.githubusercontent.com/rsansores/magic_logs/main/explorer/images/explorer.png)
 
 ## Attributes
 
@@ -62,7 +71,8 @@ transaction, which is where its row-level settings live.
 
 Rust, PostgreSQL with TimescaleDB, one table, counts only. Not generic over
 databases or aggregations, no joins, no query language, no alerting. No
-authorization of its own and no web framework.
+authorization of its own and no web framework. The explorer: Vue 3, no CSS,
+no chart library.
 
 Counts are of whole buckets: a window that begins mid-hour counts that hour.
 An explorer shows them rounded.
