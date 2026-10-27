@@ -43,7 +43,7 @@ import {
 const explorer = useLogExplorer({ fields: ['level', 'kind', 'unit'], store: urlStore() })
 const answers = useLogFetch<MyEvent>(explorer, {
   histogram: (q, step, signal) => get('/events/histogram', { ...q, step: step.name }, signal),
-  facets: (q, fields, signal) => get('/events/facets', { ...q, fields }, signal),
+  facets: (q, names, signal) => get('/events/facets', { ...q, facets: names }, signal),
   page: (q, cursor, signal) => get('/events', { ...q, cursor }, signal),
   grouped: (q, signal) => get('/events/grouped', q, signal),
 })

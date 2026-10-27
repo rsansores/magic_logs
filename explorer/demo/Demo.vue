@@ -63,6 +63,15 @@ const label = (s: string) => kindNames[s] ?? s
 
 // What the bars count: every filter applies (a facet's own count leaves
 // out its own field's filter).
+// The window's count, exactly: the level facet's sum — of the chosen
+// levels when some are, as the facet counts every level whatever is chosen
+// of it. (The bars count whole buckets, which may reach past the window.)
+const total = computed(() => {
+  const levelsChosen = explorer.fields.level.value
+  return answers.facets.value
+    .filter((f) => f.field === 'level' && (!levelsChosen.length || levelsChosen.includes(f.value ?? '')))
+    .reduce((n, f) => n + f.count, 0)
+})
 const stepNames: Record<string, string> = {
   minute: 'minute',
   fiveMinutes: 'five minutes',
@@ -162,9 +171,10 @@ const hovered = ref<number | null>(null)
                  from the start of the first bucket, which is counted whole. -->
             <div class="chart-head">
               <div>
-                <strong>{{ number.format(geometry.bars.reduce((n, b) => n + b.total, 0)) }}</strong> events
+                <strong>{{ number.format(total) }}</strong> events
                 <span class="muted">
-                  · {{ moment.format(geometry.range.from) }} – {{ moment.format(geometry.range.to) }} UTC
+                  · {{ moment.format(explorer.range.value.from) }} –
+                  {{ moment.format(explorer.range.value.to) }} UTC
                   <template v-if="answers.bucketsAnswer.value">
                     · by {{ stepNames[answers.bucketsAnswer.value.step.name] }}
                   </template>

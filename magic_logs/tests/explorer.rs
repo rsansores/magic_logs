@@ -446,6 +446,10 @@ async fn the_json_an_explorer_reads_is_the_contract(pool: PgPool) {
         env!("CARGO_MANIFEST_DIR"),
         "/../explorer/src/core/contract/fixtures/answers.ts"
     );
+    // A packaged copy of the crate has no explorer beside it.
+    if !std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../explorer")).exists() {
+        return;
+    }
     if std::env::var_os("UPDATE_CONTRACT").is_some() {
         std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
         std::fs::write(path, &text).unwrap();

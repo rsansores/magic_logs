@@ -40,7 +40,7 @@ let bars: Vec<Bucket> = histogram(&Event::SPEC, &filter, Duration::days(1))?
     .await?;
 ```
 
-And [`magic_logs_explorer`](explorer/), the Vue 3 side without its looks:
+And [`magic_logs_explorer`](https://github.com/rsansores/magic_logs/tree/main/explorer/), the Vue 3 side without its looks:
 the window, the facets, the histogram's geometry and its brush, the pages
 — state in your URL, drawn by your own components.
 
@@ -58,7 +58,7 @@ the window, the facets, the histogram's geometry and its brush, the pages
   hypertable's unique keys must). Rows it already holds are moved into
   chunks by the migration, which holds the table locked for as long as
   that takes and needs room for a second copy while it does;
-  [operating it](HOW_IT_WORKS.md#operating-it) says what follows.
+  [operating it](https://github.com/rsansores/magic_logs/blob/main/HOW_IT_WORKS.md#operating-it) says what follows.
 
 ## Why
 
@@ -101,7 +101,7 @@ newest first, from an index.
   late recounts only the buckets it fell in.
 - **No retention of its own.** The counts are refreshed over all of
   history, so dropping old rows drops their counts at the next refresh:
-  drop both, or neither. [Operating it](HOW_IT_WORKS.md#operating-it) has
+  drop both, or neither. [Operating it](https://github.com/rsansores/magic_logs/blob/main/HOW_IT_WORKS.md#operating-it) has
   the rest.
 
 ## Defining a table
@@ -171,7 +171,7 @@ and one per `indexed` field and the `top`), the columnstore and its
 policy, the four counts with their refresh and compression policies —
 and, for each of the five relations (the table and its counts), whatever
 `govern` writes. Run it from your own
-migrations; the [golden copy](magic_logs/tests/golden/migration.sql) shows
+migrations; the [golden copy](https://github.com/rsansores/magic_logs/blob/main/magic_logs/tests/golden/migration.sql) shows
 what it writes.
 
 ```rust
@@ -194,7 +194,7 @@ it in parallel workers: a setting read as `(SELECT current_setting(…))`, a
 function marked `STABLE PARALLEL SAFE`. Measured on a month of hourly
 counts, four facets took 4.1 s through a predicate evaluated per row in one
 worker, and 0.46 s through one evaluated once, in parallel
-([how it works](HOW_IT_WORKS.md#governing)).
+([how it works](https://github.com/rsansores/magic_logs/blob/main/HOW_IT_WORKS.md#governing)).
 
 ## Asking
 
@@ -272,18 +272,18 @@ five warm runs.
 A day of rows is 4.2 GB before compression; the thirty days hold 17 GB in
 all, two uncompressed. What stays slow: a one-hour window at one-minute
 bars reads the rows (~270 ms), and a page deep inside compressed history
-decompresses its chunk (~2 s). [How it works](HOW_IT_WORKS.md#what-it-costs)
+decompresses its chunk (~2 s). [How it works](https://github.com/rsansores/magic_logs/blob/main/HOW_IT_WORKS.md#what-it-costs)
 has the rest, and what each number was before the fix it measures.
 
 ## Learn more
 
-- [How it works](HOW_IT_WORKS.md): the tables, the counts and their
+- [How it works](https://github.com/rsansores/magic_logs/blob/main/HOW_IT_WORKS.md): the tables, the counts and their
   refresh, which question reads what, governing, what it costs.
-- [`magic_logs_explorer`](explorer/): the Vue 3 explorer, without its looks,
+- [`magic_logs_explorer`](https://github.com/rsansores/magic_logs/tree/main/explorer/): the Vue 3 explorer, without its looks,
   and its demo.
-- [`examples/fleet`](examples/fleet/): a server over TimescaleDB, its reads
+- [`examples/fleet`](https://github.com/rsansores/magic_logs/tree/main/examples/fleet/): a server over TimescaleDB, its reads
   governed by zone, that the demo reads.
-- [The changelog](CHANGELOG.md), and [how to contribute](CONTRIBUTING.md).
+- [The changelog](https://github.com/rsansores/magic_logs/blob/main/CHANGELOG.md), and [how to contribute](https://github.com/rsansores/magic_logs/blob/main/CONTRIBUTING.md).
 
 ## Status
 

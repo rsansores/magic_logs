@@ -121,8 +121,10 @@ the second, in the form TimescaleDB excludes chunks — and compressed
 segments — by: without it, a page in history opens every chunk newer than
 its cursor. Page fifty costs what page one costs. An id type the host's
 column has (`uuid`, `bigint`) is cast from the cursor's text, so the cursor
-crosses an HTTP boundary as a string. There is no total: a count of the
-window is the histogram's sum.
+crosses an HTTP boundary as a string. There is no total: the window's
+count is any facet's sum (the level's, with nothing chosen of it — or the
+chosen values' counts when something is). The histogram's sum counts the
+whole buckets the window touches, which may reach past it.
 
 ## Governing
 
@@ -166,8 +168,13 @@ buffers; p50 of five warm runs, milliseconds, read through governed views.
 | a page of 100 | 0.5 | 1.1 | 2.0 | 8.4 |
 | histogram (hourly, then daily from 7 days) | 14 | 46 | 17 | — |
 | four facets (daily from 3 days) | 30 | — | 33 | — |
-| grouped, top 50 | 48 | 125 | 303 | 282 |
+| grouped, top 50 | ~230¹ | 125 | 303 | 282 |
 | a page of one kind and level, with the kind `indexed` | 2 | — | — | 66 |
+
+¹ Exact since groups are counted in parts: from the counts per hour and
+`top` and the rows at the window's edges, measured without the governed
+view (whole days of the daily counts per `top` took 48 ms, and counted
+outside the window).
 
 Storage: an uncompressed day is 4.2 GB, of which 1.3 GB is index;
 compressed, 0.4 GB. Thirty days, two of them uncompressed, are 17 GB. The

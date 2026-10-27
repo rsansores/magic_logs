@@ -637,6 +637,13 @@ mod json {
             env!("CARGO_MANIFEST_DIR"),
             "/../explorer/src/core/contract/rows.ts"
         );
+        // A packaged copy of the crate has no explorer beside it.
+        if !std::path::Path::new(path)
+            .parent()
+            .is_some_and(|p| p.exists())
+        {
+            return;
+        }
         if std::env::var_os("UPDATE_CONTRACT").is_some() {
             std::fs::write(path, &text).unwrap();
         }

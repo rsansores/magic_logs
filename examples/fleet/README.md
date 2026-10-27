@@ -36,7 +36,9 @@ and open http://localhost:5198/?server.
     bars among them — answered 400.
 
 ```sh
-curl -H 'x-zones: Harbor' "localhost:3001/api/facets?from=2026-10-01T00:00:00Z&to=2026-10-31T00:00:00Z"
+# The last day, as the harbor's dispatcher sees it (GNU date; macOS: date -u -v-1d).
+from=$(date -u -d '1 day ago' +%FT%TZ) to=$(date -u +%FT%TZ)
+curl -H 'x-zones: Harbor' "localhost:3001/api/facets?from=$from&to=$to"
 ```
 
 `DATABASE_URL` points the server elsewhere, and `FLEET_LISTEN`
