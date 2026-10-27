@@ -82,15 +82,14 @@ fn zoned(g: &Governed) -> String {
     )
 }
 
-/// The policies' background jobs held still: a test refreshes and
-/// compresses when it means to, never racing a job that does it too.
-async fn hold_jobs(pool: &PgPool) {
-    sqlx::query(
-        "SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs WHERE job_id >= 1000",
+/// `migration`, its policies' background jobs held still in the same
+/// transaction: a test refreshes and compresses when it means to, and no
+/// job starts between the migration and the hold to race it.
+fn held(migration: String) -> String {
+    format!(
+        "{migration}\nSELECT alter_job(job_id, scheduled => false) \
+         FROM timescaledb_information.jobs WHERE job_id >= 1000;"
     )
-    .execute(pool)
-    .await
-    .unwrap();
 }
 
 async fn refresh(pool: &PgPool) {
@@ -126,11 +125,10 @@ async fn prepare(pool: &PgPool, govern: fn(&Governed) -> String) {
     .execute(pool)
     .await
     .unwrap();
-    sqlx::raw_sql(&migration(&Event::SPEC, govern))
+    sqlx::raw_sql(&held(migration(&Event::SPEC, govern)))
         .execute(pool)
         .await
         .unwrap();
-    hold_jobs(pool).await;
     // Four days, three units in two zones, every 10 minutes, a mix of kinds and levels.
     sqlx::raw_sql(&format!(
         "INSERT INTO private.events \
@@ -772,11 +770,10 @@ async fn a_table_of_only_a_time_and_an_id_is_made_a_log_table(pool: PgPool) {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::raw_sql(&migration(&Ping::SPEC, plain))
+    sqlx::raw_sql(&held(migration(&Ping::SPEC, plain)))
         .execute(&pool)
         .await
         .unwrap();
-    hold_jobs(&pool).await;
     let bars: Vec<Bucket> = histogram(&Ping::SPEC, &window(1), Duration::hours(1))
         .unwrap()
         .build_query_as()
@@ -843,11 +840,10 @@ async fn names_sql_must_quote_and_a_tenant_that_is_the_top_migrate(pool: PgPool)
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::raw_sql(&migration(&Reading::SPEC, plain))
+    sqlx::raw_sql(&held(migration(&Reading::SPEC, plain)))
         .execute(&pool)
         .await
         .unwrap();
-    hold_jobs(&pool).await;
     let filter = Filter::new(day(), day() + Duration::days(5));
     let counts: Vec<FacetCount> = facets(&Reading::SPEC, &filter, &["unit_id", "kind"])
         .unwrap()
@@ -982,11 +978,10 @@ async fn a_late_row_into_a_large_compressed_day_of_counts_is_counted(pool: PgPoo
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::raw_sql(&migration(&Event::SPEC, plain))
+    sqlx::raw_sql(&held(migration(&Event::SPEC, plain)))
         .execute(&pool)
         .await
         .unwrap();
-    hold_jobs(&pool).await;
     // 2,000 units × 25 kinds × 3 levels, once a day for two days: 150,000
     // rows of the counts per day and unit in one day's bucket, past the cap.
     sqlx::raw_sql(&format!(
