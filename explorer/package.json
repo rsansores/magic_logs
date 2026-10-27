@@ -64,7 +64,7 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.5",
     "@vitejs/plugin-vue": "^6.0.9",
     "@vue/test-utils": "^2.5.1",
     "eslint": "^10.12.0",
