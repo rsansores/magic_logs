@@ -21,7 +21,7 @@ export const flag: Codec<boolean> = {
   serialize: (value) => (value ? '1' : '0'),
 }
 
-const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/i
+const RFC3339 = /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/i
 
 /** An instant, as RFC 3339 with its offset (a time without one would be
  * read in the browser's zone), written back in UTC. */
@@ -32,7 +32,9 @@ export const instant: Codec<string> = {
     if (Number.isNaN(at.getTime())) return undefined
     // A date that does not exist (February 30th) is not rolled into March.
     const [y, m, d] = raw.slice(0, 10).split('-').map(Number)
-    const day = new Date(Date.UTC(y!, m! - 1, d!))
+    // setUTCFullYear, not Date.UTC: years 0–99 are themselves.
+    const day = new Date(0)
+    day.setUTCFullYear(y!, m! - 1, d!)
     if (day.getUTCFullYear() !== y || day.getUTCMonth() !== m! - 1 || day.getUTCDate() !== d) return undefined
     const year = at.getUTCFullYear()
     return year < 1 || year > 9999 ? undefined : at.toISOString()

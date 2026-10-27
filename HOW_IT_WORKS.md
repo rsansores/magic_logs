@@ -47,13 +47,19 @@ milliseconds (about 30 ms on the first host's 300 million rows), and one
 after a late row recounts only the buckets that row fell in, however old.
 What lies past the counts' watermark — the end of the last refresh — is
 read from the rows (`materialized_only = false`): a count always includes
-the last hour.
+the last hour. A policy refreshes a long history in batches, oldest first,
+so the watermark only ever moves over what is counted (TimescaleDB's
+default is newest first, which moved it past history still to count:
+after a migration over existing rows, every answer came up short until
+the last batch landed).
 
 A refresh of your own (after a backfill, say) ends where the policy's
 would: `CALL refresh_continuous_aggregate('…_hourly', NULL, now() -
 interval '1 hour')`, the daily one at `now() - interval '1 day'` — each
-hourly count before its daily one, the pair per `top` too (the fleet
-example's `set_up` does it). One that ends later (`NULL`, or in the future) moves the watermark
+hourly count before its daily one, the pair per `top` too. While a policy
+job refreshes the same count, yours fails with SQLSTATE `55P03`: retry it,
+or hold the job first (`SELECT alter_job(job_id, scheduled => false)`) and
+let it go after. One that ends later (`NULL`, or in the future) moves the watermark
 past now: a row that arrives in a bucket already counted is not read from
 the rows, and waits for the policy to reach that bucket — up to two days
 for the daily counts.
@@ -166,11 +172,16 @@ Storage: an uncompressed day is 4.2 GB, of which 1.3 GB is index;
 compressed, 0.4 GB. Thirty days, two of them uncompressed, are 17 GB. The
 counts: 92,000 hourly rows a day, 183,000 per day and unit, and 2.2 million
 per hour and unit — about a fifth of the rows, 275 MB a day before
-compression. Every count is compressed after `compress_after`, as the
-rows are (TimescaleDB 2.18.1 is the first that compresses a count
-refreshed over all of history); a late row's refresh writes into its
-compressed chunks. The late-row costs above were measured before the
-counts per hour and unit existed: a late row now recounts those too.
+compression. Every count has chunks as long as the table's and is
+compressed after `compress_after`, as the rows are, in one run ordered by
+its bucket: a late row's refresh rewrites only the compressed batches that
+hold its bucket. One day's bucket of the counts per day and unit is still
+183,000 rows, past the cap TimescaleDB puts on rows one statement may
+decompress (100,000) — and before 2.21 that cap stopped the refresh, every
+time, in the background. Hence the floor: the migration refuses an older
+TimescaleDB by name. The late-row costs above were measured before the
+counts were compressed or kept per hour and unit: a late row now
+decompresses and recounts a day of those too.
 Loading a
 10-million-row day takes about 100 s; compressing it, 25 s. Ingesting
 through the governed view with foreign keys checked: 58,000 rows a second.

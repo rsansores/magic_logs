@@ -61,7 +61,8 @@ describe('urlStore', () => {
     expect(kind.value).toEqual(['a', 'b'])
     const length = window.history.length
     q.value = 'seal'
-    expect(window.location.search).toBe('?q=seal&kind=a%2Cb')
+    // The other key's text is left exactly as it was written.
+    expect(window.location.search).toBe('?q=seal&kind=a,b')
     expect(window.location.hash).toBe('#top')
     kind.value = []
     expect(window.location.search).toBe('?q=seal')
@@ -681,6 +682,37 @@ describe('round eight', () => {
     expect(value.e.fields.kind.value).toEqual(['door'])
     value.f.clear()
     expect(value.e.fields.kind.value).toEqual([])
+    scope.stop()
+  })
+})
+
+describe('round nine', () => {
+  it('stops live when the window is made custom', () => {
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [] }))
+    e.live.value = true
+    e.choose('custom')
+    expect(e.live.value).toBe(false)
+    scope.stop()
+  })
+
+  it('drops a value a field refuses, in memory as in the address', () => {
+    const { value: e, scope } = scoped(() =>
+      useLogExplorer({ fields: { level: { accept: (v) => v === 'info' } } }),
+    )
+    e.toggle('level', 'Error')
+    expect(e.fields.level.value).toEqual([])
+    e.toggle('level', 'info')
+    expect(e.question.value.fields).toEqual({ level: ['info'] })
+    scope.stop()
+  })
+
+  it('leaves the address it does not own as it was written', () => {
+    at('/?a=b%20c&flag&x=1%2B1')
+    const { value, scope } = scoped(() => ({ q: urlStore()('q', '', text) }))
+    value.q.value = 'z'
+    expect(window.location.search).toBe('?a=b%20c&flag&x=1%2B1&q=z')
+    value.q.value = ''
+    expect(window.location.search).toBe('?a=b%20c&flag&x=1%2B1')
     scope.stop()
   })
 })

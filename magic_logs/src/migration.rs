@@ -80,10 +80,19 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         chunk = st.chunk,
         after = st.compress_after,
         counts = spec.top.map_or(" and by day".to_owned(), |t| format!(
-            ", by day, and by hour and by day and {}",
+            " and by day, and by hour and by day per {}",
             t.name
         )),
     ));
+    // Older releases refresh compressed counts under TimescaleDB's cap on
+    // rows decompressed by one statement: past it, a late row's refresh
+    // fails in the background, every time. Refused here, by name.
+    push(
+        "DO $$\nBEGIN\n    IF (SELECT (regexp_match(extversion, '^(\\d+)\\.(\\d+)'))::int[] FROM pg_extension\n         WHERE extname = 'timescaledb') < ARRAY[2, 21] THEN\n        \
+         RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later; this database has %',\n            \
+         (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');\n    END IF;\nEND\n$$;"
+            .to_owned(),
+    );
     push(format!(
         "SELECT create_hypertable({}, by_range({}, INTERVAL {}),\n                         create_default_indexes => false, migrate_data => true);",
         literal(&table),
@@ -145,13 +154,17 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         "CREATE MATERIALIZED VIEW {daily}\nWITH (timescaledb.continuous, timescaledb.materialized_only = false) AS\n\
          SELECT time_bucket(INTERVAL '1 day', bucket) AS bucket{counted}, sum(events) AS events\n  FROM {hourly}\n GROUP BY 1{counted}\nWITH NO DATA;",
     ));
+    // Oldest first: a refresh that runs in batches moves the watermark only
+    // over what it has counted. Newest first, it moved it past the history
+    // still to count, which then was read neither from the counts nor from
+    // the rows until the last batch landed.
     let mut policies = vec![
         format!(
-            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');",
+            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes', refresh_newest_first => false);",
             literal(&hourly)
         ),
         format!(
-            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour');",
+            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour', refresh_newest_first => false);",
             literal(&daily)
         ),
     ];
@@ -168,11 +181,11 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
              SELECT time_bucket(INTERVAL '1 day', bucket) AS bucket{per_top},\n       sum(events) AS events, min(first_at) AS first_at, max(last_at) AS last_at\n  FROM {hourly_top}\n GROUP BY 1{per_top}\nWITH NO DATA;",
         ));
         policies.push(format!(
-            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');",
+            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes', refresh_newest_first => false);",
             literal(&hourly_top)
         ));
         policies.push(format!(
-            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour');",
+            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour', refresh_newest_first => false);",
             literal(&daily_top)
         ));
     }
@@ -187,9 +200,18 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         .filter(|t| *t != Tier::Raw)
         .map(|tier| {
             let count = qualified(spec.schema, &spec.relation(tier));
+            // Chunks as long as the table's, and compressed in one ordered
+            // run per chunk: a late row's refresh rewrites the batches
+            // holding its bucket, not ten days of counts. Said, not left to
+            // TimescaleDB, whose defaults differ from one release to the
+            // next.
             format!(
-                "ALTER MATERIALIZED VIEW {count} SET (timescaledb.enable_columnstore = true);\n\
+                "SELECT set_chunk_time_interval({}, INTERVAL {});\n\
+                 ALTER MATERIALIZED VIEW {count} SET (\n    timescaledb.enable_columnstore = true,\n    \
+                 timescaledb.segmentby = '',\n    timescaledb.orderby = 'bucket'\n);\n\
                  CALL add_columnstore_policy({}, after => INTERVAL {});",
+                literal(&count),
+                literal(st.chunk),
                 literal(&count),
                 literal(st.compress_after)
             )

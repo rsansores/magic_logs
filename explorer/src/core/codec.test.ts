@@ -21,6 +21,8 @@ describe('the codecs refuse what a server would', () => {
     expect(instant.parse('2024-02-30T00:00:00Z')).toBeUndefined()
     expect(instant.parse('2024-04-31T00:00:00Z')).toBeUndefined()
     expect(instant.parse('2024-02-29T00:00:00Z')).toBe('2024-02-29T00:00:00.000Z')
+    expect(instant.parse('0050-06-01T00:00:00Z')).toBe('0050-06-01T00:00:00.000Z')
+    expect(instant.parse('2024-03-01T24:00:00Z')).toBeUndefined()
   })
 
   it('keeps a comma or a backslash inside a value', () => {

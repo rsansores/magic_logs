@@ -82,6 +82,17 @@ fn zoned(g: &Governed) -> String {
     )
 }
 
+/// The policies' background jobs held still: a test refreshes and
+/// compresses when it means to, never racing a job that does it too.
+async fn hold_jobs(pool: &PgPool) {
+    sqlx::query(
+        "SELECT alter_job(job_id, scheduled => false) FROM timescaledb_information.jobs WHERE job_id >= 1000",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn refresh(pool: &PgPool) {
     // Hourly before daily: the daily counts are counted from them.
     for tier in [Tier::Hourly, Tier::Daily, Tier::HourlyTop, Tier::DailyTop] {
@@ -96,6 +107,12 @@ async fn refresh(pool: &PgPool) {
 }
 
 async fn setup_with(pool: &PgPool, govern: fn(&Governed) -> String) {
+    prepare(pool, govern).await;
+    refresh(pool).await;
+}
+
+/// The table, made a log table, and four days of rows: nothing counted yet.
+async fn prepare(pool: &PgPool, govern: fn(&Governed) -> String) {
     sqlx::raw_sql(
         "CREATE EXTENSION IF NOT EXISTS timescaledb; \
          CREATE FUNCTION fold(t text) RETURNS text IMMUTABLE LANGUAGE sql \
@@ -113,6 +130,7 @@ async fn setup_with(pool: &PgPool, govern: fn(&Governed) -> String) {
         .execute(pool)
         .await
         .unwrap();
+    hold_jobs(pool).await;
     // Four days, three units in two zones, every 10 minutes, a mix of kinds and levels.
     sqlx::raw_sql(&format!(
         "INSERT INTO private.events \
@@ -130,7 +148,6 @@ async fn setup_with(pool: &PgPool, govern: fn(&Governed) -> String) {
     .execute(pool)
     .await
     .unwrap();
-    refresh(pool).await;
 }
 
 fn window(days: i64) -> Filter {
@@ -755,6 +772,7 @@ async fn a_table_of_only_a_time_and_an_id_is_made_a_log_table(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
+    hold_jobs(&pool).await;
     let bars: Vec<Bucket> = histogram(&Ping::SPEC, &window(1), Duration::hours(1))
         .unwrap()
         .build_query_as()
@@ -825,6 +843,7 @@ async fn names_sql_must_quote_and_a_tenant_that_is_the_top_migrate(pool: PgPool)
         .execute(&pool)
         .await
         .unwrap();
+    hold_jobs(&pool).await;
     let filter = Filter::new(day(), day() + Duration::days(5));
     let counts: Vec<FacetCount> = facets(&Reading::SPEC, &filter, &["unit_id", "kind"])
         .unwrap()
@@ -940,4 +959,141 @@ async fn compressed_counts_take_late_rows_and_answer_what_the_rows_answer(pool: 
     counted.sort_by(|a, b| (&a.top, &a.value).cmp(&(&b.top, &b.value)));
     raw.sort_by(|a, b| (&a.top, &a.value).cmp(&(&b.top, &b.value)));
     assert_eq!(counted, raw);
+}
+
+/// A day of counts past TimescaleDB's cap on rows decompressed by one
+/// statement (100,000): one late row into it is still counted, and the
+/// refresh that counts it does not fail.
+#[sqlx::test(migrations = false)]
+async fn a_late_row_into_a_large_compressed_day_of_counts_is_counted(pool: PgPool) {
+    sqlx::raw_sql(
+        "CREATE EXTENSION IF NOT EXISTS timescaledb; \
+         CREATE FUNCTION fold(t text) RETURNS text IMMUTABLE LANGUAGE sql AS $$ SELECT lower(t) $$; \
+         CREATE TYPE level AS ENUM ('Info', 'Warning', 'Error'); \
+         CREATE SCHEMA private; \
+         CREATE TABLE private.events (id uuid NOT NULL, at timestamptz NOT NULL, tenant_id uuid NOT NULL, \
+             zone_id uuid NOT NULL, level level NOT NULL, kind text NOT NULL, unit_id uuid NOT NULL, \
+             operator text, description text NOT NULL, seen_at timestamptz, PRIMARY KEY (id, at));",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(&migration(&Event::SPEC, plain))
+        .execute(&pool)
+        .await
+        .unwrap();
+    hold_jobs(&pool).await;
+    // 2,000 units × 25 kinds × 3 levels, once a day for two days: 150,000
+    // rows of the counts per day and unit in one day's bucket, past the cap.
+    sqlx::raw_sql(&format!(
+        "INSERT INTO private.events \
+         SELECT gen_random_uuid(), '{start}'::timestamptz + h * interval '1 day' + interval '5 minutes', \
+                '{TENANT}', '00000000-0000-0000-0000-000000000001', \
+                (ARRAY['Info','Warning','Error']::level[])[1 + l], 'k' || k, \
+                ('00000000-0000-0000-0000-' || lpad(to_hex(u), 12, '0'))::uuid, NULL, 'unit ' || u \
+           FROM generate_series(0, 1) h, generate_series(0, 2) l, generate_series(0, 24) k, \
+                generate_series(1, 2000) u;",
+        start = day().to_rfc3339()
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    refresh(&pool).await;
+    for tier in [
+        Tier::Raw,
+        Tier::Hourly,
+        Tier::Daily,
+        Tier::HourlyTop,
+        Tier::DailyTop,
+    ] {
+        let relation = if tier == Tier::Raw {
+            "private.events".to_owned()
+        } else {
+            format!("private.{}", Event::SPEC.relation(tier))
+        };
+        sqlx::query_scalar::<_, i64>(&format!(
+            "SELECT count(compress_chunk(c, if_not_compressed => true)) FROM show_chunks('{relation}') c"
+        ))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::raw_sql(&format!(
+        "INSERT INTO private.events VALUES (gen_random_uuid(), '{}', '{TENANT}', \
+         '00000000-0000-0000-0000-000000000001', 'Error', 'k1', \
+         '00000000-0000-0000-0000-000000000007', NULL, 'unit 7 came late', NULL)",
+        (day() + Duration::hours(13) + Duration::minutes(30)).to_rfc3339()
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    refresh(&pool).await;
+    let filter = Filter::new(day(), day() + Duration::days(1))
+        .with("unit_id", ["00000000-0000-0000-0000-000000000007"]);
+    let (counted, raw) = both_facets(&pool, &filter, &["kind", "level"]).await;
+    assert_eq!(counted, raw);
+    // Unit 7's day: 25 kinds × 3 levels, and the late row, once per field.
+    assert_eq!(
+        counted.iter().map(|c| c.count).sum::<i64>(),
+        2 * (25 * 3 + 1)
+    );
+}
+
+/// The migration's refresh policies, run as TimescaleDB runs them — in
+/// batches, here one batch at a time: after each, every question answers
+/// what the rows answer, the history not counted yet read from the rows.
+#[sqlx::test(migrations = false)]
+async fn a_refresh_in_batches_never_leaves_history_uncounted(pool: PgPool) {
+    prepare(&pool, plain).await;
+    let jobs: Vec<i32> = sqlx::query_scalar(
+        "SELECT job_id FROM timescaledb_information.jobs \
+          WHERE proc_name = 'policy_refresh_continuous_aggregate' ORDER BY job_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(jobs.len(), 4);
+    for job in &jobs {
+        sqlx::query(
+            "SELECT alter_job(job_id, config => config || '{\"buckets_per_batch\": 6, \"max_batches_per_execution\": 1}') \
+               FROM timescaledb_information.jobs WHERE job_id = $1",
+        )
+        .bind(job)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let spec = Event::SPEC;
+    let filter = Filter::new(
+        day() + Duration::minutes(31),
+        day() + Duration::days(3) + Duration::hours(2) + Duration::minutes(5),
+    );
+    for _ in 0..3 {
+        for job in &jobs {
+            sqlx::query("CALL run_job($1)")
+                .bind(job)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        let (counted, raw) = both_facets(&pool, &filter, &["level", "kind", "unit_id"]).await;
+        assert_eq!(counted, raw);
+        let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
+        assert_eq!(counted, raw);
+        let groups: Vec<Group> = grouped(&spec, &filter, "kind", 100)
+            .unwrap()
+            .build_query_as()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        let total: i64 = groups.iter().map(|g| g.count).sum();
+        let rows: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM private.events WHERE at >= $1 AND at < $2")
+                .bind(filter.from)
+                .bind(filter.to)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(total, rows);
+    }
 }

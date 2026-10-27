@@ -48,7 +48,7 @@ the window, the facets, the histogram's geometry and its brush, the pages
 
 ## Requirements
 
-- PostgreSQL 14 or later, with TimescaleDB 2.18.1 or later under its
+- PostgreSQL 15 or later, with TimescaleDB 2.21 or later under its
   community license (the columnstore and continuous aggregates are not in
   the Apache-2.0-only build), preloaded.
 - Rust 1.85 or later; sqlx 0.8.

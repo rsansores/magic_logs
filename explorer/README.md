@@ -118,8 +118,8 @@ How it behaves:
   slides, then four, then eight, until a whole round answers — and after
   one does, as many slides as that round took and one more. Anything the
   reader changes, or turning live off, is asked at once, and the answers on
-  their way are dropped. Reading back (`more`)
-  and zooming stop live: the window holds still while a reader reads it.
+  their way are dropped. Reading back (`more`),
+  zooming and choosing `custom` stop live: the window holds still while a reader reads it.
 - **Give your fetches a timeout.** A live wait is given up, but an answer
   that never comes holds `loading` until the next question: `fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) })`.
 - **Pages follow their question.** Until a new question's first page

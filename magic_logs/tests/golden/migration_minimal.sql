@@ -1,5 +1,15 @@
 -- magic_logs: "telemetry"."pings", a hypertable of 1 day chunks compressed after 2 days, counted by hour and by day.
 
+DO $$
+BEGIN
+    IF (SELECT (regexp_match(extversion, '^(\d+)\.(\d+)'))::int[] FROM pg_extension
+         WHERE extname = 'timescaledb') < ARRAY[2, 21] THEN
+        RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later; this database has %',
+            (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');
+    END IF;
+END
+$$;
+
 SELECT create_hypertable('"telemetry"."pings"', by_range('at', INTERVAL '1 day'),
                          create_default_indexes => false, migrate_data => true);
 
@@ -26,12 +36,22 @@ SELECT time_bucket(INTERVAL '1 day', bucket) AS bucket, sum(events) AS events
  GROUP BY 1
 WITH NO DATA;
 
-SELECT add_continuous_aggregate_policy('"telemetry"."pings_hourly"', start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');
-SELECT add_continuous_aggregate_policy('"telemetry"."pings_daily"', start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour');
+SELECT add_continuous_aggregate_policy('"telemetry"."pings_hourly"', start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes', refresh_newest_first => false);
+SELECT add_continuous_aggregate_policy('"telemetry"."pings_daily"', start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour', refresh_newest_first => false);
 
-ALTER MATERIALIZED VIEW "telemetry"."pings_hourly" SET (timescaledb.enable_columnstore = true);
+SELECT set_chunk_time_interval('"telemetry"."pings_hourly"', INTERVAL '1 day');
+ALTER MATERIALIZED VIEW "telemetry"."pings_hourly" SET (
+    timescaledb.enable_columnstore = true,
+    timescaledb.segmentby = '',
+    timescaledb.orderby = 'bucket'
+);
 CALL add_columnstore_policy('"telemetry"."pings_hourly"', after => INTERVAL '2 days');
-ALTER MATERIALIZED VIEW "telemetry"."pings_daily" SET (timescaledb.enable_columnstore = true);
+SELECT set_chunk_time_interval('"telemetry"."pings_daily"', INTERVAL '1 day');
+ALTER MATERIALIZED VIEW "telemetry"."pings_daily" SET (
+    timescaledb.enable_columnstore = true,
+    timescaledb.segmentby = '',
+    timescaledb.orderby = 'bucket'
+);
 CALL add_columnstore_policy('"telemetry"."pings_daily"', after => INTERVAL '2 days');
 
 SELECT setup_governed_view('public', 'pings', 'telemetry', 'pings', NULL);

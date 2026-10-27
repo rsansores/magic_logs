@@ -99,7 +99,7 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - timescale/timescaledb:2.18.1-pg14
+          - timescale/timescaledb:2.21.0-pg15
           - timescale/timescaledb-ha:pg18.6-ts2.31.0
     services:
       postgres:

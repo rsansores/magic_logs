@@ -261,10 +261,14 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
       if (next !== 'custom') {
         from.value = ''
         to.value = ''
-      } else if (shown.value !== 'custom') {
-        // The window on screen, held still: not instants left in the store.
-        from.value = range.value.from.toISOString()
-        to.value = range.value.to.toISOString()
+      } else {
+        // A custom window holds still: live has nothing to slide.
+        live.value = false
+        if (shown.value !== 'custom') {
+          // The window on screen: not instants left in the store.
+          from.value = range.value.from.toISOString()
+          to.value = range.value.to.toISOString()
+        }
       }
       preset.value = next
       now.value = Date.now()

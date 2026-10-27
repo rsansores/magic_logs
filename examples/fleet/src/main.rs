@@ -120,21 +120,8 @@ async fn set_up(pool: &PgPool) -> Result<(), Error> {
     if empty {
         println!("seeding thirty days of events…");
         sqlx::raw_sql(SEED).execute(pool).await?;
-        // Counted as far as each policy would count: a refresh past now
-        // would leave the rows driven in from here out of the counts until
-        // the policies caught up.
-        for (tier, lag) in [
-            ("events_hourly", "1 hour"),
-            ("events_daily", "1 day"),
-            ("events_hourly_unit", "1 hour"),
-            ("events_daily_unit", "1 day"),
-        ] {
-            sqlx::query(&format!(
-                "CALL refresh_continuous_aggregate('fleet.{tier}', NULL, now() - interval '{lag}')"
-            ))
-            .execute(pool)
-            .await?;
-        }
+        // The counts are the policies' to refresh, from now: until they
+        // have, what is not counted yet is read from the rows.
     }
     Ok(())
 }

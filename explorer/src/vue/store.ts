@@ -10,8 +10,17 @@ import type { Codec } from '../core/codec.js'
  * `(key, initial, codec) => useRouteState(key, initial, { codec })`. */
 export type Store = <T>(key: string, initial: T, codec: Codec<T>) => Ref<T>
 
-/** Plain refs: the state lives as long as the explorer does. */
-export const memoryStore: Store = <T>(_key: string, initial: T) => ref(initial) as Ref<T>
+/** Plain refs: the state lives as long as the explorer does. A value is
+ * kept as its codec would read it back, as the address would keep it. */
+export const memoryStore: Store = <T>(_key: string, initial: T, codec: Codec<T>): Ref<T> => {
+  const held = ref(initial) as Ref<T>
+  return computed<T>({
+    get: () => held.value,
+    set: (value) => {
+      held.value = codec.parse(codec.serialize(value)) ?? initial
+    },
+  })
+}
 
 /** The address bar's query, written with `history.replaceState` so the back
  * button leaves the page rather than stepping through every filter. A value
@@ -46,7 +55,7 @@ export function urlStore(): Store {
         // The address as it is, this key changed; and what this store read
         // of it, this key changed too — another key moves on the back
         // button, not on an unrelated write.
-        const query = put(new URLSearchParams(window.location.search)).toString()
+        const query = spliced(window.location.search, key, text === codec.serialize(initial) ? null : text)
         window.history.replaceState(
           window.history.state,
           '',
@@ -60,4 +69,27 @@ export function urlStore(): Store {
 
 function frozen<T>(value: T): T {
   return typeof value === 'object' && value !== null ? Object.freeze(value) : value
+}
+
+/** `search` with `key`'s parameter set to `value` (left out for null), the
+ * other parameters' text left exactly as it was. */
+function spliced(search: string, key: string, value: string | null): string {
+  const named = (segment: string) => {
+    const name = segment.split('=')[0] ?? ''
+    try {
+      return decodeURIComponent(name.replace(/\+/g, ' ')) === key
+    } catch {
+      return false
+    }
+  }
+  const segments = search
+    .replace(/^\?/, '')
+    .split('&')
+    .filter((s) => s !== '')
+  const mine = value === null ? [] : [`${encodeURIComponent(key)}=${encodeURIComponent(value)}`]
+  const at = segments.findIndex(named)
+  const rest = segments.filter((s) => !named(s))
+  if (at === -1) rest.push(...mine)
+  else rest.splice(at, 0, ...mine)
+  return rest.join('&')
 }
