@@ -68,7 +68,7 @@ it. Kept forever, the table outgrows its disk.
 
 magic_logs makes the table a TimescaleDB hypertable of one-day chunks,
 compressed after two days (about twelve to one), with counts kept by hour,
-by day, and by day and entity, refreshed as rows arrive — late ones
+by day, and by hour and by day per entity, refreshed as rows arrive — late ones
 included. Each question reads the smallest table that answers it: a month's
 histogram reads thirty rows per value, not a billion. A page is keyset,
 newest first, from an index.
@@ -88,11 +88,11 @@ newest first, from an index.
 - **A histogram's bars are whole buckets.** `histogram` counts every bucket
   of its step the window touches, whole — the first and the last too —
   whether it reads the counts or the rows: each bar is exactly its bucket.
-- **Facets and groups count whole hours or days.** Read from the counts, a
-  window that begins mid-hour counts that hour, and over the daily counts
-  it begins at midnight UTC. An explorer shows them rounded; the rows
-  themselves are always exact. A question that names a field the counts do
-  not keep, a search, or a step finer than an hour reads the rows.
+- **Facets and groups are exact.** The window is read in parts: its whole
+  days from the daily counts, the whole hours beside them from the hourly
+  ones, the minutes at either end from the rows. Each answers what the
+  rows answer, for any window. A question that names a field the counts do
+  not keep, or a search, reads the rows.
 - **Late rows count.** The counts are refreshed over all of history: a
   refresh with nothing new costs milliseconds, and a row that arrives days
   late recounts only the buckets it fell in.
@@ -145,8 +145,8 @@ pub struct Reading {
 | field | `id`, `time` | the tie-breaker and the time (required) |
 | field | `tenant`, `scope` | kept in every count, and filtered and counted like a `facet`; `scope` is what your views narrow readers by |
 | field | `level` | counted, and what the histogram is stacked by |
-| field | `facet` | counted by hour and by day; `per_top` also per day and `top`; `indexed` (of a `facet` or a `filter`) gets an index of its own |
-| field | `top` | the entity counted on its own, per day: the grouped view's rows |
+| field | `facet` | counted by hour and by day; `per_top` also per `top`; `indexed` (of a `facet` or a `filter`) gets an index of its own |
+| field | `top` | the entity counted on its own, by hour and by day: the grouped view's rows |
 | field | `filter` | a filter the counts do not keep: naming it reads the rows |
 | field | `search` | searched as text, every such column |
 | field | `sql = "…"` | the SQL type a filter's values are cast to, when the Rust type does not say (an enum) |
@@ -229,9 +229,9 @@ let groups: Vec<Group> = grouped(&Event::SPEC, &filter, "kind", 50)?
 | question | reads |
 |---|---|
 | `page` | the rows, from `(time DESC, id DESC)`, or a field's own index |
-| `histogram` | the daily counts for a step of whole days, the hourly ones for whole hours, when the filter names only counted fields; the rows otherwise |
-| `facets` | the daily counts past three days, the hourly ones within; a `top` from the counts per day and `top` past three days; the rows for what the counts do not keep |
-| `grouped` | the counts per day and `top` past three days, when the filter and the grouped field are kept there; the rows otherwise |
+| `histogram` | the daily counts for a step of whole days, the hourly ones for whole hours (per `top` when it names the `top`); the rows for a finer step; each bar its bucket, whole |
+| `facets` | exact, in parts: whole days from the daily counts, whole hours from the hourly, the edge minutes from the rows; the rows alone for what no count keeps |
+| `grouped` | exact, in the same parts of the counts per `top`; the rows alone for what they do not keep |
 
 A refused question — a window that ends before it begins, a field the table
 does not have, one named twice, a search of a table that searches nothing,
@@ -260,7 +260,7 @@ five warm runs.
 | a page of 100, newest first | 2 (8 for a reader of 2 % of the units) |
 | the histogram, by day | 17 |
 | four facets | 33 |
-| the 50 largest groups | ~300 |
+| the 50 largest groups | ~300 (~230 over a day) |
 | a page narrowed to one kind and level | 2–70 |
 
 A day of rows is 4.2 GB before compression; the thirty days hold 17 GB in

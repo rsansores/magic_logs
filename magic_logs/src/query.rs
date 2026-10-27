@@ -148,48 +148,42 @@ pub struct Group {
     pub last_at: Option<DateTime<Utc>>,
 }
 
-/// Counts across more days than this are read per day.
-const DAILY_FROM: i64 = 3;
-
-/// The counts that answer `filter`, or the rows: in buckets of `step` for a
-/// histogram, whole for a facet. Per day for a step of whole days, or a
-/// facet over more than three days; per hour for a step of whole hours, or a
-/// shorter facet; per day and `top` for a daily question that names the
-/// `top`; the rows for a finer step, a search, or a field the counts do not
-/// keep.
-pub fn counts_tier(spec: &Spec, filter: &Filter, step: Option<Duration>) -> Tier {
-    tier_keeping(spec, filter, step, None)
+/// One stretch of a window, and the table that counts it exactly: the
+/// rows, or counts whose every bucket lies inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Part {
+    /// The table read.
+    pub tier: Tier,
+    /// Where the stretch begins, inclusive.
+    pub from: DateTime<Utc>,
+    /// Where it ends, exclusive.
+    pub to: DateTime<Utc>,
 }
 
-/// [`counts_tier`], of a tier that also keeps the column `also` (a facet's).
-fn tier_keeping(spec: &Spec, filter: &Filter, step: Option<Duration>, also: Option<&str>) -> Tier {
-    let whole = |unit: Duration| {
-        let micros = |d: Duration| d.num_microseconds().unwrap_or(i64::MAX);
-        step.is_none_or(|s| s >= unit && micros(s) % micros(unit) == 0)
-    };
-    if filter.searched().is_some() || !whole(Duration::hours(1)) {
-        return Tier::Raw;
+/// The counts that keep every field a question names: the counts by hour
+/// and day, or those per `top`.
+#[derive(Clone, Copy)]
+enum Family {
+    Counted,
+    PerTop,
+}
+
+fn family(spec: &Spec, filter: &Filter, also: &[&str], per_top: bool) -> Option<Family> {
+    if filter.searched().is_some() {
+        return None;
     }
-    let daily = match step {
-        Some(_) => whole(Duration::days(1)),
-        None => filter.to - filter.from > Duration::days(DAILY_FROM),
-    };
     let kept_in = |tier| {
         filter
             .named()
-            .chain(also)
+            .chain(also.iter().copied())
             .all(|name| keeps(spec, tier, name))
     };
-    if kept_in(Tier::Hourly) {
-        if daily {
-            Tier::Daily
-        } else {
-            Tier::Hourly
-        }
-    } else if daily && spec.top.is_some() && kept_in(Tier::DailyTop) {
-        Tier::DailyTop
+    if !per_top && kept_in(Tier::Hourly) {
+        Some(Family::Counted)
+    } else if spec.top.is_some() && kept_in(Tier::HourlyTop) {
+        Some(Family::PerTop)
     } else {
-        Tier::Raw
+        None
     }
 }
 
@@ -198,51 +192,123 @@ fn keeps(spec: &Spec, tier: Tier, name: &str) -> bool {
     match tier {
         Tier::Raw => true,
         Tier::Hourly | Tier::Daily => spec.field(name).is_some_and(|f| f.counted),
-        Tier::DailyTop => {
+        Tier::HourlyTop | Tier::DailyTop => {
             spec.top.is_some_and(|t| t.name == name) || spec.field(name).is_some_and(|f| f.per_top)
         }
     }
 }
 
-/// The counts per day and `top` that answer `filter` — a window longer than
-/// three days whose every field they keep — or the rows.
-pub fn per_top_tier(spec: &Spec, filter: &Filter) -> Tier {
-    let kept = filter.named().all(|name| keeps(spec, Tier::DailyTop, name));
-    // Whole days answer a window of days; a shorter one, its rows.
-    let long = filter.to - filter.from > Duration::days(DAILY_FROM);
-    if spec.top.is_none() || !kept || !long || filter.searched().is_some() {
-        Tier::Raw
+const HOUR: i64 = 3_600_000_000;
+const DAY: i64 = 24 * HOUR;
+
+fn floor(t: DateTime<Utc>, unit: i64) -> DateTime<Utc> {
+    let micros = t.timestamp_micros();
+    DateTime::from_timestamp_micros(micros - micros.rem_euclid(unit)).unwrap_or(t)
+}
+
+fn ceil(t: DateTime<Utc>, unit: i64) -> DateTime<Utc> {
+    let down = floor(t, unit);
+    if down == t {
+        t
     } else {
-        Tier::DailyTop
+        down + Duration::microseconds(unit)
     }
+}
+
+/// The table a histogram of `filter` in buckets of `step` reads: the daily
+/// counts for a step of whole days, the hourly ones for whole hours — per
+/// `top` when the filter names the `top` — and the rows for a finer step, a
+/// search, or a field no count keeps. Each bar counts its bucket whole,
+/// whichever it reads.
+pub fn histogram_tier(spec: &Spec, filter: &Filter, step: Duration) -> Tier {
+    let micros = step.num_microseconds().unwrap_or(i64::MAX);
+    let whole = |unit: i64| micros >= unit && micros % unit == 0;
+    let daily = whole(DAY);
+    match family(spec, filter, &[], false) {
+        _ if !whole(HOUR) => Tier::Raw,
+        Some(Family::Counted) if daily => Tier::Daily,
+        Some(Family::Counted) => Tier::Hourly,
+        Some(Family::PerTop) if daily => Tier::DailyTop,
+        Some(Family::PerTop) => Tier::HourlyTop,
+        None => Tier::Raw,
+    }
+}
+
+/// The stretches `filter`'s window is counted in, exactly, by a question
+/// that also reads the columns `also` (a facet's field, a grouping's): the
+/// whole days inside it from the daily counts, the whole hours beside them
+/// from the hourly ones, and the minutes at either end from the rows. A
+/// search, or a field no count keeps, reads the rows alone; so does a
+/// window inside one hour.
+pub fn parts(spec: &Spec, filter: &Filter, also: &[&str]) -> Vec<Part> {
+    parts_of(spec, filter, also, false)
+}
+
+/// [`parts`], from the counts per `top` alone when `per_top` (a grouping's
+/// first and last row are kept there only).
+fn parts_of(spec: &Spec, filter: &Filter, also: &[&str], per_top: bool) -> Vec<Part> {
+    let (from, to) = (filter.from, filter.to);
+    let rows = vec![Part {
+        tier: Tier::Raw,
+        from,
+        to,
+    }];
+    let Some(family) = family(spec, filter, also, per_top) else {
+        return rows;
+    };
+    let (hourly, daily) = match family {
+        Family::Counted => (Tier::Hourly, Tier::Daily),
+        Family::PerTop => (Tier::HourlyTop, Tier::DailyTop),
+    };
+    let (h0, h1) = (ceil(from, HOUR), floor(to, HOUR));
+    if h0 >= h1 {
+        return rows;
+    }
+    let (d0, d1) = (ceil(from, DAY), floor(to, DAY));
+    let mut out = Vec::new();
+    let mut push = |tier, from, to| {
+        if from < to {
+            out.push(Part { tier, from, to });
+        }
+    };
+    push(Tier::Raw, from, h0);
+    if d0 < d1 {
+        push(hourly, h0, d0);
+        push(daily, d0, d1);
+        push(hourly, d1, h1);
+    } else {
+        push(hourly, h0, h1);
+    }
+    push(Tier::Raw, h1, to);
+    out
 }
 
 fn source(spec: &Spec, tier: Tier) -> String {
     qualified(spec.view_schema, &spec.relation(tier))
 }
 
-fn bucket_of(tier: Tier) -> &'static str {
-    match tier {
-        Tier::Hourly => "1 hour",
-        _ => "1 day",
-    }
+/// What a question takes of the time: a stretch, exactly, or every bucket
+/// of a step the window touches, whole.
+enum Bounds {
+    Stretch(DateTime<Utc>, DateTime<Utc>),
+    Buckets(Duration),
 }
 
-/// `WHERE` the window, and every field but `except`.
+/// `WHERE` the time, every field's values and the search.
 fn push_where(
     qb: &mut QueryBuilder<'static, Postgres>,
     spec: &Spec,
     filter: &Filter,
     tier: Tier,
-    buckets: Option<Duration>,
+    bounds: Bounds,
 ) {
-    if let Some(step) = buckets {
+    let at = match tier {
+        Tier::Raw => ident(spec.time),
+        _ => "bucket".to_owned(),
+    };
+    if let Bounds::Buckets(step) = bounds {
         // A histogram counts every bucket of `step` the window touches,
         // whole, whatever it reads: each bar is its bucket's count.
-        let at = match tier {
-            Tier::Raw => ident(spec.time),
-            _ => "bucket".to_owned(),
-        };
         qb.push(format!(" WHERE {at} >= time_bucket("));
         qb.push_bind(step_interval(step));
         qb.push(", ");
@@ -253,21 +319,12 @@ fn push_where(
         qb.push_bind(filter.to);
         qb.push(" - INTERVAL '1 microsecond') + ");
         qb.push_bind(step_interval(step));
-    } else if tier == Tier::Raw {
-        let time = ident(spec.time);
-        qb.push(format!(" WHERE {time} >= "));
-        qb.push_bind(filter.from);
-        qb.push(format!(" AND {time} < "));
-        qb.push_bind(filter.to);
-    } else {
-        // A count's bucket is whole: the window takes the bucket it begins in.
-        qb.push(format!(
-            " WHERE bucket >= time_bucket(INTERVAL '{}', ",
-            bucket_of(tier)
-        ));
-        qb.push_bind(filter.from);
-        qb.push(") AND bucket < ");
-        qb.push_bind(filter.to);
+    } else if let Bounds::Stretch(from, to) = bounds {
+        // A stretch of counts begins and ends on its buckets: exact.
+        qb.push(format!(" WHERE {at} >= "));
+        qb.push_bind(from);
+        qb.push(format!(" AND {at} < "));
+        qb.push_bind(to);
     }
     for (name, values) in &filter.fields {
         if values.is_empty() {
@@ -326,7 +383,13 @@ pub fn page(
     }
     let (time, id) = (ident(spec.time), ident(spec.id.name));
     let mut qb = QueryBuilder::new(format!("SELECT * FROM {}", source(spec, Tier::Raw)));
-    push_where(&mut qb, spec, filter, Tier::Raw, None);
+    push_where(
+        &mut qb,
+        spec,
+        filter,
+        Tier::Raw,
+        Bounds::Stretch(filter.from, filter.to),
+    );
     if let Some(cursor) = cursor {
         // The time alone bounds the chunks read: TimescaleDB excludes chunks,
         // and compressed segments, by a column's range, not by a row's.
@@ -355,7 +418,7 @@ pub fn histogram(
     if step < Duration::microseconds(1) || step.subsec_nanos() % 1_000 != 0 {
         return Err(Error::Step);
     }
-    let tier = counts_tier(spec, filter, Some(step));
+    let tier = histogram_tier(spec, filter, step);
     let level = spec.level.map_or("NULL::text".to_owned(), |l| {
         format!("{}::text", ident(l.name))
     });
@@ -369,15 +432,16 @@ pub fn histogram(
         ", {at}) AS bucket, {level} AS level, {count} AS count FROM {}",
         source(spec, tier)
     ));
-    push_where(&mut qb, spec, filter, tier, Some(step));
+    push_where(&mut qb, spec, filter, tier, Bounds::Buckets(step));
     qb.push(" GROUP BY 1, 2 ORDER BY 1, 2");
     Ok(qb)
 }
 
 /// How many rows hold each value of every field in `fields`, each counted
 /// under every other field's filter but its own, so a reader sees what a
-/// second value would add: rows of [`FacetCount`]. The `top` is counted per
-/// `top`; the rest by hour or by day.
+/// second value would add: rows of [`FacetCount`]. Exact: each field is
+/// counted over the [`parts`] of the window, from the counts where they
+/// keep it and the rows where they do not.
 pub fn facets(
     spec: &Spec,
     filter: &Filter,
@@ -392,27 +456,33 @@ pub fn facets(
         }
         let mut alone = filter.clone();
         alone.fields.retain(|(n, _)| n != name);
-        let tier = if Some(*name) == top {
-            per_top_tier(spec, &alone)
-        } else {
-            tier_keeping(spec, &alone, None, Some(name))
-        };
-        let count = if tier == Tier::Raw {
-            "count(*)"
-        } else {
-            "sum(events)::bigint"
-        };
         if i > 0 {
             qb.push(" UNION ALL ");
         }
         qb.push(format!(
-            "(SELECT {} AS field, {}::text AS value, {count} AS count FROM {}",
-            literal(name),
-            ident(name),
-            source(spec, tier)
+            "(SELECT {} AS field, value, sum(n)::bigint AS count FROM (",
+            literal(name)
         ));
-        push_where(&mut qb, spec, &alone, tier, None);
-        qb.push(" GROUP BY 2)");
+        for (j, part) in parts(spec, &alone, &[name]).into_iter().enumerate() {
+            if j > 0 {
+                qb.push(" UNION ALL ");
+            }
+            qb.push(format!(
+                "SELECT {}::text AS value, {} AS n FROM {}",
+                ident(name),
+                counted(part.tier),
+                source(spec, part.tier)
+            ));
+            push_where(
+                &mut qb,
+                spec,
+                &alone,
+                part.tier,
+                Bounds::Stretch(part.from, part.to),
+            );
+            qb.push(" GROUP BY 1");
+        }
+        qb.push(") AS parts GROUP BY 2)");
     }
     if fields.is_empty() {
         qb.push("SELECT NULL::text AS field, NULL::text AS value, 0::bigint AS count WHERE false");
@@ -421,7 +491,9 @@ pub fn facets(
 }
 
 /// The `limit` largest groups of `top` × `by` under `filter`, with each
-/// group's first and last row: rows of [`Group`].
+/// group's first and last row: rows of [`Group`]. Exact: counted over the
+/// [`parts`] of the window, from the counts per `top` where they keep
+/// every field named, and the rows otherwise.
 pub fn grouped(
     spec: &Spec,
     filter: &Filter,
@@ -433,35 +505,53 @@ pub fn grouped(
         return Err(Error::Limit);
     }
     let top = spec.top.ok_or(Error::NoTop)?;
-    let field = spec
-        .field(by)
-        .ok_or_else(|| Error::UnknownField(by.to_owned()))?;
-    let tier = match per_top_tier(spec, filter) {
-        Tier::DailyTop if field.per_top => Tier::DailyTop,
-        _ => Tier::Raw,
-    };
-    let (count, first, last) = match tier {
-        Tier::Raw => (
-            "count(*)".to_owned(),
-            format!("min({})", ident(spec.time)),
-            format!("max({})", ident(spec.time)),
-        ),
-        _ => (
-            "sum(events)::bigint".to_owned(),
-            "min(first_at)".to_owned(),
-            "max(last_at)".to_owned(),
-        ),
-    };
-    let mut qb = QueryBuilder::new(format!(
-        "SELECT {}::text AS top, {}::text AS value, {count} AS count, {first} AS first_at, {last} AS last_at FROM {}",
-        ident(top.name),
-        ident(by),
-        source(spec, tier)
-    ));
-    push_where(&mut qb, spec, filter, tier, None);
-    qb.push(" GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT ");
+    if spec.field(by).is_none() {
+        return Err(Error::UnknownField(by.to_owned()));
+    }
+    let mut qb = QueryBuilder::new(
+        "SELECT top, value, sum(n)::bigint AS count, min(first) AS first_at, max(last) AS last_at FROM (",
+    );
+    for (j, part) in parts_of(spec, filter, &[top.name, by], true)
+        .into_iter()
+        .enumerate()
+    {
+        if j > 0 {
+            qb.push(" UNION ALL ");
+        }
+        let (first, last) = match part.tier {
+            Tier::Raw => (
+                format!("min({})", ident(spec.time)),
+                format!("max({})", ident(spec.time)),
+            ),
+            _ => ("min(first_at)".to_owned(), "max(last_at)".to_owned()),
+        };
+        qb.push(format!(
+            "SELECT {}::text AS top, {}::text AS value, {} AS n, {first} AS first, {last} AS last FROM {}",
+            ident(top.name),
+            ident(by),
+            counted(part.tier),
+            source(spec, part.tier)
+        ));
+        push_where(
+            &mut qb,
+            spec,
+            filter,
+            part.tier,
+            Bounds::Stretch(part.from, part.to),
+        );
+        qb.push(" GROUP BY 1, 2");
+    }
+    qb.push(") AS parts GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT ");
     qb.push_bind(limit);
     Ok(qb)
+}
+
+/// How a stretch counts its rows: one by one, or by the counts' sums.
+fn counted(tier: Tier) -> &'static str {
+    match tier {
+        Tier::Raw => "count(*)::bigint",
+        _ => "sum(events)::bigint",
+    }
 }
 
 fn literal(text: &str) -> String {

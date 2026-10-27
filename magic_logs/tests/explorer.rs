@@ -83,7 +83,8 @@ fn zoned(g: &Governed) -> String {
 }
 
 async fn refresh(pool: &PgPool) {
-    for tier in [Tier::Hourly, Tier::Daily, Tier::DailyTop] {
+    // Hourly before daily: the daily counts are counted from them.
+    for tier in [Tier::Hourly, Tier::Daily, Tier::HourlyTop, Tier::DailyTop] {
         sqlx::query(&format!(
             "CALL refresh_continuous_aggregate('private.{}', NULL, NULL)",
             Event::SPEC.relation(tier)
@@ -158,10 +159,7 @@ async fn the_counts_answer_what_the_rows_answer(pool: PgPool) {
             .fetch_all(&pool)
             .await
             .unwrap();
-        assert_ne!(
-            magic_logs::counts_tier(&spec, &filter, Some(step)),
-            Tier::Raw
-        );
+        assert_ne!(magic_logs::histogram_tier(&spec, &filter, step), Tier::Raw);
         let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search("unit"), step)
             .unwrap()
             .build_query_as()
@@ -174,8 +172,14 @@ async fn the_counts_answer_what_the_rows_answer(pool: PgPool) {
 
     // Facets, each under the other filters but its own.
     let filter = window(4).with("kind", ["door"]).with("level", ["Error"]);
-    assert_eq!(magic_logs::counts_tier(&spec, &filter, None), Tier::Daily);
-    assert_eq!(magic_logs::per_top_tier(&spec, &filter), Tier::DailyTop);
+    let tiers = |also: &[&str]| -> Vec<Tier> {
+        magic_logs::parts(&spec, &filter, also)
+            .iter()
+            .map(|p| p.tier)
+            .collect()
+    };
+    assert_eq!(tiers(&[]), [Tier::Daily]);
+    assert_eq!(tiers(&["unit_id"]), [Tier::DailyTop]);
     let mut counted: Vec<FacetCount> =
         facets(&spec, &filter, &["kind", "level", "zone_id", "unit_id"])
             .unwrap()
@@ -297,7 +301,14 @@ fn a_filter_is_held_to_the_table() {
             .check(&spec),
         Err(magic_logs::Error::FieldTwice("kind".into()))
     );
-    let tier = |f: &Filter, step| magic_logs::counts_tier(&spec, f, step);
+    let tier = |f: &Filter, step: Option<Duration>| match step {
+        Some(step) => magic_logs::histogram_tier(&spec, f, step),
+        None => magic_logs::parts(&spec, f, &[])
+            .iter()
+            .map(|p| p.tier)
+            .max_by_key(|t| *t as u8)
+            .unwrap(),
+    };
     assert_eq!(
         tier(
             &window(1).with("operator", ["ana"]),
@@ -332,12 +343,38 @@ fn a_filter_is_held_to_the_table() {
     );
     assert_eq!(tier(&window(7), Some(Duration::hours(6))), Tier::Hourly);
     assert_eq!(tier(&window(7), Some(Duration::days(1))), Tier::Daily);
-    assert_eq!(tier(&window(2), None), Tier::Hourly);
     assert_eq!(tier(&window(7), None), Tier::Daily);
     assert_eq!(
-        magic_logs::per_top_tier(&spec, &window(7).with("unit_id", ["x"])),
-        Tier::DailyTop
+        magic_logs::histogram_tier(&spec, &window(7).with("unit_id", ["x"]), Duration::hours(1)),
+        Tier::HourlyTop
     );
+    // A window is read whole days from the daily counts, whole hours beside
+    // them from the hourly ones, and the minutes at its ends from the rows.
+    let unaligned = Filter::new(
+        day() + Duration::minutes(20),
+        day() + Duration::days(2) + Duration::hours(5) + Duration::minutes(10),
+    );
+    let at = |d: i64, h: i64, m: i64| {
+        day() + Duration::days(d) + Duration::hours(h) + Duration::minutes(m)
+    };
+    let parts: Vec<(Tier, DateTime<Utc>, DateTime<Utc>)> =
+        magic_logs::parts(&spec, &unaligned, &[])
+            .iter()
+            .map(|p| (p.tier, p.from, p.to))
+            .collect();
+    assert_eq!(
+        parts,
+        [
+            (Tier::Raw, at(0, 0, 20), at(0, 1, 0)),
+            (Tier::Hourly, at(0, 1, 0), at(1, 0, 0)),
+            (Tier::Daily, at(1, 0, 0), at(2, 0, 0)),
+            (Tier::Hourly, at(2, 0, 0), at(2, 5, 0)),
+            (Tier::Raw, at(2, 5, 0), at(2, 5, 10)),
+        ]
+    );
+    // Inside one hour, the rows alone.
+    let short = Filter::new(at(0, 10, 5), at(0, 10, 50));
+    assert_eq!(magic_logs::parts(&spec, &short, &[]).len(), 1);
 }
 
 /// The JSON an explorer reads, from a database: what
@@ -455,7 +492,7 @@ async fn a_question_narrowed_to_one_top_reads_its_daily_counts(pool: PgPool) {
     let unit = "00000000-0000-0000-0000-0000000000a2";
     let filter = window(4).with("unit_id", [unit]).with("kind", ["door"]);
     assert_eq!(
-        magic_logs::counts_tier(&spec, &filter, Some(Duration::days(1))),
+        magic_logs::histogram_tier(&spec, &filter, Duration::days(1)),
         Tier::DailyTop
     );
     let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
@@ -463,11 +500,13 @@ async fn a_question_narrowed_to_one_top_reads_its_daily_counts(pool: PgPool) {
     assert!(!counted.is_empty());
     let (counted, raw) = both_facets(&pool, &filter, &["level", "kind", "unit_id"]).await;
     assert_eq!(counted, raw);
-    // By the hour, the counts per day cannot answer: the rows do.
+    // By the hour, the counts per hour and top.
     assert_eq!(
-        magic_logs::counts_tier(&spec, &filter, Some(Duration::hours(1))),
-        Tier::Raw
+        magic_logs::histogram_tier(&spec, &filter, Duration::hours(1)),
+        Tier::HourlyTop
     );
+    let (counted, raw) = both_histograms(&pool, &filter, Duration::hours(1)).await;
+    assert_eq!(counted, raw);
 }
 
 #[sqlx::test(migrations = false)]
@@ -731,7 +770,13 @@ async fn a_short_window_counts_its_tops_from_the_rows(pool: PgPool) {
     let spec = Event::SPEC;
     let begins = day() + Duration::hours(10);
     let filter = Filter::new(begins, begins + Duration::minutes(30));
-    assert_eq!(magic_logs::per_top_tier(&spec, &filter), Tier::Raw);
+    assert_eq!(
+        magic_logs::parts(&spec, &filter, &["unit_id"])
+            .iter()
+            .map(|p| p.tier)
+            .collect::<Vec<_>>(),
+        [Tier::Raw]
+    );
     let (counted, raw) = both_facets(&pool, &filter, &["unit_id"]).await;
     assert_eq!(counted, raw);
     assert_eq!(counted.iter().map(|f| f.count).sum::<i64>(), 3 * 3);
@@ -802,4 +847,43 @@ async fn names_sql_must_quote_and_a_tenant_that_is_the_top_migrate(pool: PgPool)
         .await
         .unwrap();
     assert_eq!(groups.iter().map(|g| g.count).sum::<i64>(), 600);
+}
+
+#[sqlx::test(migrations = false)]
+async fn facets_and_groups_answer_what_the_rows_answer_for_any_window(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    let begins = day() + Duration::minutes(7);
+    for span in [
+        Duration::minutes(5),
+        Duration::minutes(95),
+        Duration::hours(26) + Duration::minutes(13),
+        Duration::days(3) + Duration::hours(10) + Duration::minutes(41),
+    ] {
+        for filter in [
+            Filter::new(begins, begins + span),
+            Filter::new(begins, begins + span).with("kind", ["door", "gps"]),
+            Filter::new(begins, begins + span)
+                .with("unit_id", ["00000000-0000-0000-0000-0000000000a1"]),
+        ] {
+            let (counted, raw) =
+                both_facets(&pool, &filter, &["level", "kind", "zone_id", "unit_id"]).await;
+            assert_eq!(counted, raw, "facets over {span}: {filter:?}");
+            let mut counted: Vec<Group> = grouped(&spec, &filter, "kind", 1000)
+                .unwrap()
+                .build_query_as()
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+            let mut raw: Vec<Group> = grouped(&spec, &filter.clone().search("unit"), "kind", 1000)
+                .unwrap()
+                .build_query_as()
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+            counted.sort_by(|a, b| (&a.top, &a.value).cmp(&(&b.top, &b.value)));
+            raw.sort_by(|a, b| (&a.top, &a.value).cmp(&(&b.top, &b.value)));
+            assert_eq!(counted, raw, "groups over {span}: {filter:?}");
+        }
+    }
 }

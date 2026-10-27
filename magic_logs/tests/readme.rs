@@ -209,7 +209,7 @@ fn the_readmes_code_compiles() {
 #[test]
 fn the_readmes_govern_writes_a_view_per_relation() {
     let sql = magic_logs::migration(&Event::SPEC, govern);
-    assert_eq!(sql.matches("CREATE VIEW \"api\".\"events").count(), 4);
+    assert_eq!(sql.matches("CREATE VIEW \"api\".\"events").count(), 5);
 }
 
 /// The README's `govern`, run: every relation made, and a reader of one

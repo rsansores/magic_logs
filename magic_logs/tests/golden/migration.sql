@@ -1,4 +1,4 @@
--- magic_logs: "telemetry"."events", a hypertable of 1 day chunks compressed after 2 days, counted by hour, by day, and by day and unit_id.
+-- magic_logs: "telemetry"."events", a hypertable of 1 day chunks compressed after 2 days, counted by hour, by day, and by hour and by day and unit_id.
 
 SELECT create_hypertable('"telemetry"."events"', by_range('at', INTERVAL '1 day'),
                          create_default_indexes => false, migrate_data => true);
@@ -28,19 +28,29 @@ SELECT time_bucket(INTERVAL '1 day', bucket) AS bucket, "tenant_id", "zone_id", 
  GROUP BY 1, "tenant_id", "zone_id", "severity", "kind"
 WITH NO DATA;
 
-CREATE MATERIALIZED VIEW "telemetry"."events_daily_unit"
+CREATE MATERIALIZED VIEW "telemetry"."events_hourly_unit"
 WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
-SELECT time_bucket(INTERVAL '1 day', "at") AS bucket, "tenant_id", "unit_id", "zone_id", "severity", "kind",
+SELECT time_bucket(INTERVAL '1 hour', "at") AS bucket, "tenant_id", "unit_id", "zone_id", "severity", "kind",
        count(*) AS events, min("at") AS first_at, max("at") AS last_at
   FROM "telemetry"."events"
  GROUP BY 1, "tenant_id", "unit_id", "zone_id", "severity", "kind"
 WITH NO DATA;
 
+CREATE MATERIALIZED VIEW "telemetry"."events_daily_unit"
+WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
+SELECT time_bucket(INTERVAL '1 day', bucket) AS bucket, "tenant_id", "unit_id", "zone_id", "severity", "kind",
+       sum(events) AS events, min(first_at) AS first_at, max(last_at) AS last_at
+  FROM "telemetry"."events_hourly_unit"
+ GROUP BY 1, "tenant_id", "unit_id", "zone_id", "severity", "kind"
+WITH NO DATA;
+
 SELECT add_continuous_aggregate_policy('"telemetry"."events_hourly"', start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');
 SELECT add_continuous_aggregate_policy('"telemetry"."events_daily"', start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour');
-SELECT add_continuous_aggregate_policy('"telemetry"."events_daily_unit"', start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');
+SELECT add_continuous_aggregate_policy('"telemetry"."events_hourly_unit"', start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');
+SELECT add_continuous_aggregate_policy('"telemetry"."events_daily_unit"', start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour');
 
 SELECT setup_governed_view('api', 'events', 'telemetry', 'events', 'zone_id');
 SELECT setup_governed_view('api', 'events_hourly', 'telemetry', 'events_hourly', 'zone_id');
 SELECT setup_governed_view('api', 'events_daily', 'telemetry', 'events_daily', 'zone_id');
+SELECT setup_governed_view('api', 'events_hourly_unit', 'telemetry', 'events_hourly_unit', 'zone_id');
 SELECT setup_governed_view('api', 'events_daily_unit', 'telemetry', 'events_daily_unit', 'zone_id');

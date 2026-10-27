@@ -24,22 +24,24 @@ columnstore, ordered by `time DESC, id DESC` and segmented by `segment_by`
 (the entity most pages narrow to): about twelve to one on the first host's
 events, and a compressed chunk is read in that order without sorting.
 
-Three continuous aggregates — the counts — read it:
+Continuous aggregates — the counts — read it, two families of two:
 
 | relation | bucket | kept by | read for |
 |---|---|---|---|
-| `<name>_hourly` | an hour | the tenant, the scope, the level, every `facet` | short windows |
-| `<name>_daily` | a day, from the hourly | the same | windows past three days |
-| `<name>_daily_<top>` (a `top` ending in `_id` without it: `unit_id` gives `events_daily_unit`) | a day | the tenant, the `top`, the scope, the level, every `per_top` facet; first and last time | grouped, and the `top`'s facet |
+| `<name>_hourly` | an hour | the tenant, the scope, the level, every `facet` | hours |
+| `<name>_daily` | a day, from the hourly | the same | days |
+| `<name>_hourly_<top>` | an hour | the tenant, the `top`, the scope, the level, every `per_top` facet; first and last time | a question naming the `top`, grouped |
+| `<name>_daily_<top>` | a day, from the hourly per `top` | the same | the same, by day |
 
-The daily counts are a continuous aggregate over the hourly one, so a day
-is summed from 24 rows, not from its events.
+A `top` ending in `_id` names its counts without it: `unit_id` gives
+`events_hourly_unit`. Each daily count is a continuous aggregate over its
+hourly one, so a day is summed from 24 rows, not from its events.
 
 ## The refresh
 
 Every count is refreshed over all of history (`start_offset => NULL`): the
-hourly and per-`top` ones every five minutes up to an hour ago, the daily
-one every hour up to a day ago. TimescaleDB keeps a log of which buckets
+hourly ones every five minutes up to an hour ago, the daily ones every
+hour up to a day ago. TimescaleDB keeps a log of which buckets
 changed since the last refresh, so a refresh with nothing new costs
 milliseconds (about 30 ms on the first host's 300 million rows), and one
 after a late row recounts only the buckets that row fell in, however old.
@@ -68,44 +70,40 @@ watermark is counted at once (real-time aggregation).
 
 ## Which question reads what
 
-A question names a window, values of some fields, and maybe a search.
-`counts_tier` and `per_top_tier` pick the smallest table that holds every
-field it names:
+A question names a window, values of some fields, and maybe a search. A
+search, or a field no count keeps (a `filter`), reads the rows. Otherwise
+the counts answer, from the family that keeps every field named: the
+hourly and daily counts, or — when the question names the `top`, or
+groups by it — those per `top`.
 
-- a **histogram** reads the daily counts for a step of whole days, the
-  hourly ones for a step of whole hours; a step finer than an hour, a
-  search, or a field the counts do not keep (a `filter`) reads the rows;
-- a **facet** reads the daily counts for a window longer than three days,
-  the hourly ones for a shorter one; the `top`'s facet reads the counts per
-  day and `top` for a window longer than three days, the rows for a
-  shorter one (the hourly counts do not keep the `top`);
-- **grouped** reads the counts per day and `top` for a window longer than
-  three days when every field the filter names, and the grouped one, are
-  kept there; the rows otherwise — a group's first and last row are then
-  the window's own;
-- a **page** always reads the rows.
+- A **histogram** (`histogram_tier`) reads the daily counts for a step of
+  whole days, the hourly ones for whole hours, and the rows for a finer
+  step. It counts every bucket of its step the window touches, whole:
+  `[time_bucket(step, from), time_bucket(step, to − 1µs) + step)`, the same
+  bounds on the counts and on the rows, so each bar is exactly its
+  bucket's count whichever it reads.
+- A **facet** and a **group** are exact: the window is split into
+  [`parts`](https://docs.rs/magic_logs/latest/magic_logs/fn.parts.html) —
+  the whole days inside it from the daily counts, the whole hours beside
+  them from the hourly ones, the minutes at either end from the rows — and
+  the parts are summed. A window inside one hour is read from the rows
+  alone. A group's first and last row are those of the window.
+- A **page** always reads the rows.
 
-A question that names the `top` (one unit) and asks by whole days reads
-the counts per day and `top`, when every other field it names is kept
-there (`per_top`): the hourly and daily counts do not keep the `top`.
-
-A histogram counts every bucket of its step the window touches, whole:
-`[time_bucket(step, from), time_bucket(step, to − 1µs) + step)`, the same
-bounds on the counts and on the rows, so each bar is exactly its bucket's
-count whichever it reads. A facet or a group read from the counts is of
-whole buckets of the counts: the window takes every bucket that begins in
-`[time_bucket(from), to)`. A window from 10:20 counts from
-10:00 in the hourly counts and from midnight UTC in the daily ones; the
-rows answer to the second. An explorer that shows a count rounds it
-(`1.2k`), and the rows it lists are always exact.
+A window from 10:20 on the 1st to 05:10 on the 3rd is read as 10:20–11:00
+from the rows, 11:00–00:00 from the hourly counts, the 2nd from the daily
+counts, 00:00–05:00 from the hourly counts and 05:00–05:10 from the rows:
+what it costs is a day of daily rows, a day of hourly rows and at most two
+hours of the rows themselves, whatever its length.
 
 ## Facets
 
 A facet counts each value of one field under every other field's filter
 but its own: with `kind = door` chosen, the `kind` facet still counts every
-kind, so a reader sees what choosing a second would add. Each field is one
-`SELECT … GROUP BY` with its own filter left out, each from its own tier,
-and the fields are one statement (`UNION ALL`): one round trip.
+kind, so a reader sees what choosing a second would add. Each field is
+summed over its own parts — its own filter left out, so its parts may read
+other tables than its neighbours' — and the fields are one statement
+(`UNION ALL`): one round trip.
 
 ## Pages
 
@@ -165,7 +163,9 @@ buffers; p50 of five warm runs, milliseconds, read through governed views.
 
 Storage: an uncompressed day is 4.2 GB, of which 1.3 GB is index;
 compressed, 0.4 GB. Thirty days, two of them uncompressed, are 17 GB. The
-counts: 92,000 hourly rows a day, 183,000 per day and unit. Loading a
+counts: 92,000 hourly rows a day, 183,000 per day and unit, and 2.2 million
+per hour and unit — about a fifth of the rows, 275 MB a day before
+compression. Loading a
 10-million-row day takes about 100 s; compressing it, 25 s. Ingesting
 through the governed view with foreign keys checked: 58,000 rows a second.
 
@@ -177,7 +177,9 @@ What is still slow:
   ago) decompresses its chunk to sort it: 960 ms from the table, 2.2 s
   through a governed view;
 - grouped over a month counts every unit × kind of every day: about
-  1.5 million rows of the per-`top` counts, ~300 ms.
+  1.5 million rows of the per-`top` counts, ~300 ms. Over a day, exact
+  from the counts per hour and `top` and the rows at its edges: ~230 ms
+  (measured without the governed view; the rows alone took 516 ms).
 
 Before the indexes above, a page of a month took 5–9 s: the newest chunk
 had only TimescaleDB's default `(time DESC)` index, and the compressed

@@ -161,6 +161,20 @@ fn queries() -> String {
         .to_owned(),
     );
     add(
+        "facets over a window off the hour: its minutes from the rows, its hours and days from the counts",
+        facets(
+            &spec,
+            &Filter::new(
+                day() + Duration::minutes(20),
+                day() + Duration::days(3) + Duration::hours(5) + Duration::minutes(10),
+            ),
+            &["severity"],
+        )
+        .unwrap()
+        .sql()
+        .to_owned(),
+    );
+    add(
         "facets over six hours: the hourly counts",
         facets(&spec, &hours, &["severity", "kind"])
             .unwrap()

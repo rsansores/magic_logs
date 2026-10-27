@@ -4,7 +4,7 @@
 //! A row type says, with `#[derive(MagicLog)]`, which column is its time,
 //! which its level, which its facets, its `top` and its scope.
 //! [`migration`] prints the SQL that makes the table a compressed hypertable
-//! counted by hour, by day and by day and `top`; [`page`], [`histogram`],
+//! counted by hour and by day, and per `top`; [`page`], [`histogram`],
 //! [`facets`] and [`grouped`] build the queries, each read from the cheapest
 //! table that answers it. Authorization is the host's: every relation is read
 //! through a view the host makes, in [`Spec::view_schema`].
@@ -80,8 +80,8 @@ mod spec;
 pub use magic_logs_derive::MagicLog;
 pub use migration::{migration, Governed};
 pub use query::{
-    counts_tier, facets, grouped, histogram, page, per_top_tier, Bucket, Cursor, FacetCount,
-    Filter, Group,
+    facets, grouped, histogram, histogram_tier, page, parts, Bucket, Cursor, FacetCount, Filter,
+    Group, Part,
 };
 pub use spec::{Column, Field, MagicLog, Spec, Storage, Tier};
 

@@ -80,7 +80,7 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         chunk = st.chunk,
         after = st.compress_after,
         counts = spec.top.map_or(" and by day".to_owned(), |t| format!(
-            ", by day, and by day and {}",
+            ", by day, and by hour and by day and {}",
             t.name
         )),
     ));
@@ -157,13 +157,22 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
     ];
     if spec.top.is_some() {
         let per_top = listed(spec.counted_per_top());
+        let hourly_top = qualified(spec.schema, &spec.relation(Tier::HourlyTop));
+        push(format!(
+            "CREATE MATERIALIZED VIEW {hourly_top}\nWITH (timescaledb.continuous, timescaledb.materialized_only = false) AS\n\
+             SELECT time_bucket(INTERVAL '1 hour', {time}) AS bucket{per_top},\n       count(*) AS events, min({time}) AS first_at, max({time}) AS last_at\n  FROM {table}\n GROUP BY 1{per_top}\nWITH NO DATA;",
+        ));
         let daily_top = qualified(spec.schema, &spec.relation(Tier::DailyTop));
         push(format!(
             "CREATE MATERIALIZED VIEW {daily_top}\nWITH (timescaledb.continuous, timescaledb.materialized_only = false) AS\n\
-             SELECT time_bucket(INTERVAL '1 day', {time}) AS bucket{per_top},\n       count(*) AS events, min({time}) AS first_at, max({time}) AS last_at\n  FROM {table}\n GROUP BY 1{per_top}\nWITH NO DATA;",
+             SELECT time_bucket(INTERVAL '1 day', bucket) AS bucket{per_top},\n       sum(events) AS events, min(first_at) AS first_at, max(last_at) AS last_at\n  FROM {hourly_top}\n GROUP BY 1{per_top}\nWITH NO DATA;",
         ));
         policies.push(format!(
             "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');",
+            literal(&hourly_top)
+        ));
+        policies.push(format!(
+            "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour');",
             literal(&daily_top)
         ));
     }

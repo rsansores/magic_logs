@@ -126,7 +126,8 @@ async fn set_up(pool: &PgPool) -> Result<(), Error> {
         for (tier, lag) in [
             ("events_hourly", "1 hour"),
             ("events_daily", "1 day"),
-            ("events_daily_unit", "1 hour"),
+            ("events_hourly_unit", "1 hour"),
+            ("events_daily_unit", "1 day"),
         ] {
             sqlx::query(&format!(
                 "CALL refresh_continuous_aggregate('fleet.{tier}', NULL, now() - interval '{lag}')"

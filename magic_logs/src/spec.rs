@@ -76,7 +76,9 @@ pub enum Tier {
     Hourly,
     /// Counts per day, from the hourly ones.
     Daily,
-    /// Counts per day and `top`, with the first and last row.
+    /// Counts per hour and `top`, with the first and last row.
+    HourlyTop,
+    /// Counts per day and `top`, from the hourly ones.
     DailyTop,
 }
 
@@ -92,20 +94,23 @@ impl Spec {
             Tier::Raw => self.name.to_owned(),
             Tier::Hourly => format!("{}_hourly", self.name),
             Tier::Daily => format!("{}_daily", self.name),
-            Tier::DailyTop => format!(
-                "{}_daily_{}",
-                self.name,
-                self.top
-                    .map(|t| t.name.strip_suffix("_id").unwrap_or(t.name))
-                    .unwrap_or("top")
-            ),
+            Tier::HourlyTop => format!("{}_hourly_{}", self.name, self.top_short()),
+            Tier::DailyTop => format!("{}_daily_{}", self.name, self.top_short()),
         }
+    }
+
+    /// The `top` as the counts per `top` are named by: without an `_id`.
+    fn top_short(&self) -> &'static str {
+        self.top
+            .map(|t| t.name.strip_suffix("_id").unwrap_or(t.name))
+            .unwrap_or("top")
     }
 
     /// Every tier this table has: the counts per `top` only with a `top`.
     pub fn tiers(&self) -> Vec<Tier> {
         let mut tiers = vec![Tier::Raw, Tier::Hourly, Tier::Daily];
         if self.top.is_some() {
+            tiers.push(Tier::HourlyTop);
             tiers.push(Tier::DailyTop);
         }
         tiers

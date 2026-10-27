@@ -337,6 +337,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     if let Some(top) = top {
         let short = top.name.strip_suffix("_id").unwrap_or(&top.name);
         names.push(format!("{name}_daily_{short}"));
+        names.push(format!("{name}_hourly_{short}"));
     }
     for c in cols.iter().filter(|c| c.flags.top || c.flags.indexed) {
         names.push(format!("{name}_{}_{}_idx", c.name, time.name));
