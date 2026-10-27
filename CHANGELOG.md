@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1 — unreleased
+
+- A search matches words: a row matches when every word of the search is
+  in one of its searched columns, in any order (`"gate north"` finds
+  `"north gate"`). It matched the whole text as one piece before.
+- What the migration writes, the rows the explorer reads and the API are
+  unchanged: a host upgrades by taking the version.
+
 ## 0.1.0 — 2026-10-27
 
 The first release.

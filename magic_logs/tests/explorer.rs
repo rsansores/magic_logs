@@ -296,6 +296,21 @@ async fn a_page_follows_its_cursor_newest_first(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(found.len(), 58 * 3);
+    // Every word, in any order; one word missing is no match.
+    let count = |text: &str| {
+        let (spec, pool, filter) = (spec, pool.clone(), window(4).search(text));
+        async move {
+            page(&spec, &filter, None, 1000)
+                .unwrap()
+                .build_query_as::<Event>()
+                .fetch_all(&pool)
+                .await
+                .unwrap()
+                .len()
+        }
+    };
+    assert_eq!(count("  mundo   HOLA ").await, 58 * 3);
+    assert_eq!(count("mundo adiós").await, 0);
 }
 
 #[test]

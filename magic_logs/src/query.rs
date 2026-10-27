@@ -25,8 +25,8 @@ pub struct Filter {
     /// leaves the field unfiltered. The rows without a value (`NULL`), which
     /// a facet counts as `None`, are not selectable.
     pub fields: Vec<(String, Vec<String>)>,
-    /// Text the searched columns contain, as typed: `%`, `_` and `\\` are
-    /// themselves, not patterns.
+    /// Words the searched columns contain, every one, in any order and in
+    /// any of the columns: `%`, `_` and `\\` are themselves, not patterns.
     pub search: Option<String>,
 }
 
@@ -55,8 +55,9 @@ impl Filter {
         self
     }
 
-    /// The rows whose searched columns contain `text`. A blank `text` is no
-    /// search: every row, a column without a value included.
+    /// The rows whose searched columns contain every word of `text`, in any
+    /// order. A blank `text` is no search: every row, a column without a
+    /// value included.
     pub fn search(mut self, text: impl Into<String>) -> Self {
         self.search = Some(text.into());
         self
@@ -347,26 +348,29 @@ fn push_where(
             Some(f) => format!("{f}({s})"),
             None => s,
         };
-        qb.push(" AND (");
-        for (i, column) in spec.search.iter().enumerate() {
-            if i > 0 {
-                qb.push(" OR ");
+        // Every word, in any order, each in any searched column.
+        for word in text.split_whitespace() {
+            qb.push(" AND (");
+            for (i, column) in spec.search.iter().enumerate() {
+                if i > 0 {
+                    qb.push(" OR ");
+                }
+                qb.push(format!(
+                    "{} ILIKE ",
+                    wrap(format!("{}::text", ident(column)))
+                ));
+                // The word passes through the function first, then is
+                // escaped: the function may make a `%` of what it was given
+                // (unaccent folds `％` into one).
+                qb.push(format!(
+                    "'%' || replace(replace(replace({}(",
+                    spec.search_with.unwrap_or("")
+                ));
+                qb.push_bind(word.to_owned());
+                qb.push(r"), '\', '\\'), '%', '\%'), '_', '\_') || '%'");
             }
-            qb.push(format!(
-                "{} ILIKE ",
-                wrap(format!("{}::text", ident(column)))
-            ));
-            // The text passes through the function first, then is escaped:
-            // the function may make a `%` of what it was given (unaccent
-            // folds `％` into one).
-            qb.push(format!(
-                "'%' || replace(replace(replace({}(",
-                spec.search_with.unwrap_or("")
-            ));
-            qb.push_bind(text.to_owned());
-            qb.push(r"), '\', '\\'), '%', '\%'), '_', '\_') || '%'");
+            qb.push(")");
         }
-        qb.push(")");
     }
 }
 

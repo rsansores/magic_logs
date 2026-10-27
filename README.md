@@ -256,8 +256,9 @@ before any SQL is written: answer it as the caller's mistake. A value is
 sent as text and cast by the database to the column's type: one that does
 not read (`not-a-uuid` for a `uuid`, a number out of range, a date that is
 not one) is refused there with a data exception, SQLSTATE class `22`
-(`22P02`, `22003`, `22007`, …), which is the caller's mistake too. A search is text as typed: `%` and `_`
-match themselves.
+(`22P02`, `22003`, `22007`, …), which is the caller's mistake too. A search is words, as typed: a row
+matches when every word is in one of its searched columns, in any order;
+`%` and `_` match themselves.
 
 With the `serde` feature, `Bucket`, `FacetCount` and `Group` serialize as
 `magic_logs_explorer` reads them: return them as they are.
