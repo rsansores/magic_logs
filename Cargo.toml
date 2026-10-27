@@ -1,0 +1,11 @@
+[workspace]
+resolver = "3"
+members = ["magic_logs", "magic_logs_derive"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rsansores/magic_logs"
+authors = ["Ricardo Sansores <ricardo@ssf.mx>"]

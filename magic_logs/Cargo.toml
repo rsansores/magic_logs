@@ -1,0 +1,23 @@
+[package]
+name = "magic_logs"
+description = "One PostgreSQL + TimescaleDB time-series table, and the queries a log explorer asks of it: keyset pages, histograms, facets and grouped counts, each read from the cheapest table that answers it"
+keywords = ["timescaledb", "postgres", "logs", "explorer", "events"]
+categories = ["database"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../README.md"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+magic_logs_derive = { version = "=0.1.0", path = "../magic_logs_derive" }
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "chrono", "uuid"] }
+thiserror = "2"
+uuid = "1"
+
+[dev-dependencies]
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "macros", "migrate", "chrono", "uuid", "derive"] }
+tokio = { version = "1", features = ["macros", "rt"] }

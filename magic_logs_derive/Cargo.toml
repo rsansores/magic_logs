@@ -1,0 +1,20 @@
+[package]
+name = "magic_logs_derive"
+description = "#[derive(MagicLog)] for magic_logs: a row says which column is its time, its level, its facets and its scope"
+keywords = ["timescaledb", "logs", "derive"]
+categories = ["database", "development-tools::procedural-macro-helpers"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../README.md"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
