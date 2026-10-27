@@ -10,7 +10,7 @@ export type { Store } from './vue/store.js'
 // The four questions asked with the host's fetch functions, for a host with
 // no data layer of its own.
 export { useLogFetch } from './vue/useLogFetch.js'
-export type { LogAnswers, LogFetchers, Page } from './vue/useLogFetch.js'
+export type { Answered, LogAnswers, LogFetchers, Page } from './vue/useLogFetch.js'
 
 // The parts, as composables and as renderless components inside
 // `LogExplorerRoot`: the slot draws, with the host's own components.

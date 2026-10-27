@@ -1,0 +1,5 @@
+error: the views are read in `view_schema` ("public"), the table kept in `schema`: two schemas, or a view would be made over itself
+ --> tests/derive/fail/view_over_itself.rs:6:12
+  |
+6 | pub struct Event {
+  |            ^^^^^

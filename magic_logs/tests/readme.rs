@@ -119,7 +119,7 @@ fn govern(g: &Governed) -> String {
     let scope = g.scope.unwrap_or("zone");
     format!(
         "CREATE VIEW {vs}.{v} AS SELECT * FROM {s}.{r} \
-          WHERE {scope} = ANY(string_to_array(current_setting('app.zones'), ','));",
+          WHERE {scope} = ANY((SELECT string_to_array(current_setting('app.zones', true), ','))::text[]);",
         vs = g.view_schema,
         v = g.view,
         s = g.schema,
@@ -212,6 +212,47 @@ fn the_readmes_code_compiles() {
 fn the_readmes_govern_writes_a_view_per_relation() {
     let sql = magic_logs::migration(&Event::SPEC, govern);
     assert_eq!(sql.matches("CREATE VIEW api.events").count(), 4);
+}
+
+/// The README's `govern`, run: every relation made, and a reader of one
+/// zone counting only it, from the rows and from the counts.
+#[sqlx::test(migrations = false)]
+async fn the_readmes_govern_narrows_every_relation(pool: PgPool) {
+    sqlx::raw_sql(
+        "CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE SCHEMA fleet; CREATE SCHEMA api; \
+         CREATE TABLE fleet.events (id uuid NOT NULL, at timestamptz NOT NULL, zone text NOT NULL, \
+             level text NOT NULL, kind text NOT NULL, unit text NOT NULL, message text NOT NULL, \
+             PRIMARY KEY (id, at)); \
+         INSERT INTO fleet.events SELECT gen_random_uuid(), '2026-10-01'::timestamptz + n * interval '1 minute', \
+             CASE WHEN n % 3 = 0 THEN 'north' ELSE 'south' END, 'info', 'door_opened', 'truck-01', 'ok' \
+           FROM generate_series(1, 600) n;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(&magic_logs::migration(&Event::SPEC, govern))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('app.zones', 'north', true)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let from = "2026-10-01T00:00:00Z".parse().unwrap();
+    for to in ["2026-10-01T12:00:00Z", "2026-10-06T00:00:00Z"] {
+        let filter = Filter::new(from, to.parse().unwrap());
+        let counts: Vec<magic_logs::FacetCount> =
+            magic_logs::facets(&Event::SPEC, &filter, &["zone"])
+                .unwrap()
+                .build_query_as()
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(counts.len(), 1, "{to}: {counts:?}");
+        assert_eq!(counts[0].value.as_deref(), Some("north"));
+        assert_eq!(counts[0].count, 200);
+    }
 }
 
 #[test]

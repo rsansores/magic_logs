@@ -59,7 +59,8 @@ const answers = useLogFetch<MyEvent>(explorer, {
     </LogFacet>
 
     <LogHistogram :levels="['info', 'warning', 'error']" v-slot="{ geometry, brushed, handlers }">
-      <svg viewBox="0 0 1000 100" preserveAspectRatio="none" v-bind="handlers">
+      <!-- touch-action: none, or a finger scrolls the page instead of brushing -->
+      <svg viewBox="0 0 1000 100" preserveAspectRatio="none" style="touch-action: none" v-bind="handlers">
         <template v-for="bar in geometry.bars" :key="bar.at">
           <rect
             v-for="s in bar.segments"
@@ -75,7 +76,8 @@ const answers = useLogFetch<MyEvent>(explorer, {
       </svg>
     </LogHistogram>
 
-    <LogRows v-slot="{ rows, more, loadMore }">
+    <!-- :answers types the rows as yours -->
+    <LogRows :answers="answers" v-slot="{ rows, more, loadMore }">
       <MyTable :rows="rows" />
       <button v-if="more" @click="loadMore">More</button>
     </LogRows>
@@ -97,13 +99,36 @@ const answers = useLogFetch<MyEvent>(explorer, {
 | `magic_logs_explorer/core`                    | the same arithmetic with no framework: `stack`, `fill`, `geometry`, `selection`, `stepFor`, `rangeOf`, `facetOf`, the codecs                                            |
 
 With vue-query (or anything like it), skip `useLogFetch`: key your queries
-on `explorer.question` and `explorer.step`, read pages after each of
+on `explorer.question`, `explorer.step` and `explorer.asked` (it moves when
+the reader asks again, `refresh()`), read pages after each of
 `explorer.cursors`, and either hand `LogExplorerRoot` the answers in the
-`LogAnswers` shape or call `useHistogram` and `useFacet` yourself.
+`LogAnswers` shape or call `useHistogram` and `useFacet` yourself. Hand
+`useHistogram` the window and step your buckets answer, too: while the next
+answer is on its way, the bars stay where they were counted.
 
-A step is minutes for a window of two hours, whole hours up to four days,
-six hours up to twenty, and days past that — where magic_logs answers from
-its daily counts.
+How it behaves:
+
+- **The question changes only when its value does.** A write to the store
+  that leaves it as it was — another key, a `clear()` with nothing chosen,
+  a live tick on a zoomed window — asks nothing again and keeps the pages
+  read.
+- **Live slides a named window** every `liveEvery` ms (10 s). A slide while
+  answers are on their way waits for them and asks once after, so a server
+  slower than the slide still answers. Reading back (`more`) and zooming
+  stop live: the window holds still while a reader reads it.
+- **A page that fails can be asked for again**: its cursor is given back.
+- **The address is read defensively.** A preset is one of yours (not
+  `toString`), an instant is RFC 3339 with its offset, a custom window
+  spans at most `longest` (about two years), a field's values pass its
+  `accept`; anything else reads as the default. A value may hold a comma:
+  it is written `\,`.
+- **Steps**: minutes for a window of up to two hours, five minutes up to
+  eight hours, hours up to four days, six hours up to twenty, days past that
+  — where magic_logs answers from its daily counts.
+- **Time is UTC.** Buckets begin where TimescaleDB's `time_bucket` begins
+  them, on UTC boundaries, and so do the round instants `geometry` ticks
+  at: format the axis in UTC, or a day's label falls on the day before west
+  of Greenwich.
 
 ## The demo
 

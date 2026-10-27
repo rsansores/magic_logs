@@ -1,0 +1,5 @@
+error: `indexed` qualifies a `facet` or a `filter`
+  --> tests/derive/fail/indexed_alone.rs:12:9
+   |
+12 |     pub host: String,
+   |         ^^^^

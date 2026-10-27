@@ -43,3 +43,20 @@ describe('stepFor', () => {
     ])
   })
 })
+
+describe('a window from the address', () => {
+  it('names a preset only by a key of its own', () => {
+    for (const name of ['toString', 'constructor', '__proto__', 'hasOwnProperty'])
+      expect(rangeOf({ preset: name }, now, defaultPresets, '24h').from.getTime()).toBe(now - 24 * HOUR)
+  })
+
+  it('reads a custom window longer than the longest as the fallback', () => {
+    const range = rangeOf(
+      { preset: 'custom', from: '0001-01-01T00:00:00Z', to: '9999-01-01T00:00:00Z' },
+      now,
+      defaultPresets,
+      '24h',
+    )
+    expect(range.to.getTime() - range.from.getTime()).toBe(24 * HOUR)
+  })
+})

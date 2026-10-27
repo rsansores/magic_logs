@@ -76,7 +76,7 @@ export function geometry(
   const span = Math.max(range.to.getTime() - from, 1)
   const filled = fill(buckets, range, step)
   const totals = filled.map((b) => Object.values(b.counts).reduce((sum, n) => sum + n, 0))
-  const max = niceMax(Math.max(0, ...totals))
+  const max = niceMax(totals.reduce((m, t) => Math.max(m, t), 0))
   const clip = (v: number) => Math.min(Math.max(v, 0), 1)
   const bars = filled.map((b, i): Bar => {
     const order = [
@@ -116,8 +116,9 @@ export function niceMax(n: number): number {
 
 function countTicks(max: number): Tick[] {
   if (max === 0) return [{ value: 0, at: 0 }]
-  // 1, 2, 5 × 10ⁿ halve into whole numbers, and into fifths when 1 or 5.
-  const parts = max >= 10 && /^[15]/.test(String(max)) ? 5 : max === 1 ? 1 : 2
+  // 1 and 5 × 10ⁿ split into fifths of whole numbers (from 5), 2 × 10ⁿ into
+  // halves; 1 and 2 themselves into ones.
+  const parts = max >= 5 && /^[15]/.test(String(max)) ? 5 : max <= 2 ? max : 2
   return Array.from({ length: parts + 1 }, (_, i) => ({ value: (max / parts) * i, at: i / parts }))
 }
 

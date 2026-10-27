@@ -2,8 +2,10 @@ pub mod magic_logs
 pub use magic_logs::MagicLog
 pub enum magic_logs::Error
 pub magic_logs::Error::FieldTwice(alloc::string::String)
+pub magic_logs::Error::Limit
 pub magic_logs::Error::NoTop
 pub magic_logs::Error::NothingSearched
+pub magic_logs::Error::Step
 pub magic_logs::Error::UnknownField(alloc::string::String)
 pub magic_logs::Error::Window
 impl core::cmp::Eq for magic_logs::Error

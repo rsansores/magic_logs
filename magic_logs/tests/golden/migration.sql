@@ -1,7 +1,7 @@
--- magic_logs: "telemetry"."events", a hypertable of 1 day chunks compressed after 2 days, counted by hour, by day and by day and unit_id.
+-- magic_logs: "telemetry"."events", a hypertable of 1 day chunks compressed after 2 days, counted by hour, by day, and by day and unit_id.
 
 SELECT create_hypertable('"telemetry"."events"', by_range('at', INTERVAL '1 day'),
-                         create_default_indexes => false);
+                         create_default_indexes => false, migrate_data => true);
 
 CREATE INDEX "events_at_id_idx" ON "telemetry"."events" ("at" DESC, "id" DESC);
 CREATE INDEX "events_unit_id_at_idx" ON "telemetry"."events" ("unit_id", "at" DESC, "id" DESC);

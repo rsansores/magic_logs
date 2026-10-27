@@ -15,8 +15,12 @@ defineSlots<{
   }): unknown
 }>()
 
-const { explorer, answers } = useExplorerContext('LogFacet')
-const facet = useFacet(explorer, answers.facets, props.field)
+const context = useExplorerContext('LogFacet')
+const facet = useFacet(
+  () => context.explorer,
+  () => context.answers.facets.value,
+  () => props.field,
+)
 </script>
 
 <template>

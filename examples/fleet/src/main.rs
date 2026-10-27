@@ -6,8 +6,6 @@
 //! and the views every question reads through keep only their rows. That is
 //! the host's authorization, which magic_logs leaves to the host.
 
-use std::collections::HashMap;
-
 use axum::{
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
@@ -51,13 +49,14 @@ pub struct Event {
 const FIELDS: [&str; 4] = ["level", "kind", "zone", "unit"];
 
 /// Each relation read through a view that keeps the zones the reader may
-/// see: all of them when `fleet.zones` is not set.
+/// see: all of them when `fleet.zones` is not set. The setting is read in a
+/// scalar subquery, once per query rather than once per row.
 fn govern(g: &Governed) -> String {
     let scope = g.scope.expect("the fleet's events are scoped by zone");
     format!(
         "CREATE VIEW \"{vs}\".\"{v}\" AS SELECT * FROM \"{s}\".\"{r}\" \
-          WHERE coalesce(current_setting('fleet.zones', true), '') = '' \
-             OR \"{scope}\" = ANY(string_to_array(current_setting('fleet.zones', true), ','));",
+          WHERE (SELECT coalesce(current_setting('fleet.zones', true), '')) = '' \
+             OR \"{scope}\" = ANY((SELECT string_to_array(current_setting('fleet.zones', true), ','))::text[]);",
         vs = g.view_schema,
         v = g.view,
         s = g.schema,
@@ -186,20 +185,35 @@ async fn drive(pool: PgPool) {
 }
 
 /// What a request asks: the window, each field's values, the search.
-fn filter_of(q: &HashMap<String, String>) -> Result<Filter, Refused> {
+/// A request's query string: a key may come more than once (`kind=a&kind=b`),
+/// so a value may hold a comma.
+type Params = Vec<(String, String)>;
+
+fn one<'a>(q: &'a Params, key: &str) -> Option<&'a str> {
+    q.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+}
+
+fn all<'a>(q: &'a Params, key: &'a str) -> impl Iterator<Item = &'a str> {
+    q.iter()
+        .filter(move |(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+}
+
+fn filter_of(q: &Params) -> Result<Filter, Refused> {
     let instant = |key: &str| {
-        q.get(key)
+        one(q, key)
             .and_then(|v| DateTime::parse_from_rfc3339(v).ok())
             .map(|t| t.with_timezone(&Utc))
             .ok_or_else(|| Refused::Question(format!("`{key}` is an RFC 3339 instant")))
     };
     let mut filter = Filter::new(instant("from")?, instant("to")?);
     for field in FIELDS {
-        if let Some(values) = q.get(field).filter(|v| !v.is_empty()) {
-            filter = filter.with(field, values.split(','));
+        let values: Vec<&str> = all(q, field).collect();
+        if !values.is_empty() {
+            filter = filter.with(field, values);
         }
     }
-    if let Some(text) = q.get("search").filter(|v| !v.trim().is_empty()) {
+    if let Some(text) = one(q, "search").filter(|v| !v.trim().is_empty()) {
         filter = filter.search(text.trim());
     }
     filter.check(&Event::SPEC)?;
@@ -233,10 +247,10 @@ struct Page {
 async fn page_of(
     State(pool): State<PgPool>,
     headers: HeaderMap,
-    Query(q): Query<HashMap<String, String>>,
+    Query(q): Query<Params>,
 ) -> Result<Json<Page>, Refused> {
     let filter = filter_of(&q)?;
-    let cursor = match q.get("cursor") {
+    let cursor = match one(&q, "cursor") {
         Some(c) => {
             let (time, id) = c
                 .split_once('|')
@@ -269,10 +283,10 @@ async fn page_of(
 async fn histogram_of(
     State(pool): State<PgPool>,
     headers: HeaderMap,
-    Query(q): Query<HashMap<String, String>>,
+    Query(q): Query<Params>,
 ) -> Result<Json<Vec<Bucket>>, Refused> {
     let filter = filter_of(&q)?;
-    let step = match q.get("step").map(String::as_str) {
+    let step = match one(&q, "step") {
         Some("minute") => Duration::minutes(1),
         Some("fiveMinutes") => Duration::minutes(5),
         Some("hour") => Duration::hours(1),
@@ -296,7 +310,7 @@ async fn histogram_of(
 async fn facets_of(
     State(pool): State<PgPool>,
     headers: HeaderMap,
-    Query(q): Query<HashMap<String, String>>,
+    Query(q): Query<Params>,
 ) -> Result<Json<Vec<FacetCount>>, Refused> {
     let filter = filter_of(&q)?;
     let mut tx = reader(&pool, &headers).await?;
@@ -311,7 +325,7 @@ async fn facets_of(
 async fn grouped_of(
     State(pool): State<PgPool>,
     headers: HeaderMap,
-    Query(q): Query<HashMap<String, String>>,
+    Query(q): Query<Params>,
 ) -> Result<Json<Vec<Group>>, Refused> {
     let filter = filter_of(&q)?;
     let mut tx = reader(&pool, &headers).await?;
@@ -336,8 +350,13 @@ impl From<magic_logs::Error> for Refused {
 }
 
 impl From<sqlx::Error> for Refused {
+    /// A value the database could not read as its column's type — a cursor
+    /// or a filter value that is not one — is the caller's mistake.
     fn from(e: sqlx::Error) -> Self {
-        Self::Database(e)
+        match e.as_database_error().and_then(|d| d.code()).as_deref() {
+            Some("22P02" | "22007" | "22008" | "22023") => Self::Question(e.to_string()),
+            _ => Self::Database(e),
+        }
     }
 }
 

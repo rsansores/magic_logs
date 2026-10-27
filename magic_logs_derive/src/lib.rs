@@ -4,7 +4,14 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Fields, LitStr, Type};
+use syn::{ext::IdentExt, parse_macro_input, Data, DeriveInput, Fields, LitStr, Type};
+
+/// The columns the counts make of their own, which no column of the table
+/// may be named.
+const COUNTS_OWN: [&str; 4] = ["bucket", "events", "first_at", "last_at"];
+
+/// The longest identifier PostgreSQL keeps whole.
+const LONGEST: usize = 63;
 
 /// See the `magic_logs` crate's README for the attributes.
 #[proc_macro_derive(MagicLog, attributes(log))]
@@ -172,6 +179,27 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         if flags.per_top && !flags.facet {
             return Err(syn::Error::new(at, "`per_top` qualifies a `facet`"));
         }
+        if flags.indexed && !(flags.facet || flags.filter) {
+            return Err(syn::Error::new(
+                at,
+                "`indexed` qualifies a `facet` or a `filter`",
+            ));
+        }
+        let role = flags.time
+            || flags.id
+            || flags.tenant
+            || flags.scope
+            || flags.level
+            || flags.top
+            || flags.facet
+            || flags.filter
+            || flags.search;
+        if !role {
+            return Err(syn::Error::new(
+                at,
+                "say what this column is to the explorer: `facet`, `filter`, `search`, …",
+            ));
+        }
         let sql = match &flags.sql {
             Some(lit) => lit.value(),
             None => sql_of(&field.ty).ok_or_else(|| {
@@ -181,12 +209,21 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 )
             })?,
         };
+        // The column's name: `r#type` is the column `type`.
+        let name = field
+            .ident
+            .as_ref()
+            .map(|i| i.unraw().to_string())
+            .unwrap_or_default();
+        let counted = flags.tenant || flags.scope || flags.level || flags.facet || flags.top;
+        if counted && COUNTS_OWN.contains(&name.as_str()) {
+            return Err(syn::Error::new(
+                at,
+                format!("`{name}` is a column of the counts themselves: rename this one"),
+            ));
+        }
         cols.push(Col {
-            name: field
-                .ident
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
+            name,
             sql,
             flags,
             at,
@@ -221,6 +258,35 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 "segment_by names a field marked #[log(…)]",
             ));
         }
+    }
+    if view_schema == schema {
+        return Err(syn::Error::new_spanned(
+            ident,
+            format!(
+                "the views are read in `view_schema` (\"{view_schema}\"), the table kept in \
+                 `schema`: two schemas, or a view would be made over itself"
+            ),
+        ));
+    }
+    // Every relation and index the migration names, whole: PostgreSQL cuts
+    // a longer name short, and two cut alike collide.
+    let mut names = vec![
+        format!("{name}_hourly"),
+        format!("{name}_daily"),
+        format!("{name}_{}_{}_idx", time.name, id.name),
+    ];
+    if let Some(top) = top {
+        let short = top.name.strip_suffix("_id").unwrap_or(&top.name);
+        names.push(format!("{name}_daily_{short}"));
+    }
+    for c in cols.iter().filter(|c| c.flags.top || c.flags.indexed) {
+        names.push(format!("{name}_{}_{}_idx", c.name, time.name));
+    }
+    if let Some(long) = names.iter().find(|n| n.len() > LONGEST) {
+        return Err(syn::Error::new_spanned(
+            ident,
+            format!("the migration would name `{long}`, longer than PostgreSQL's {LONGEST} bytes: a shorter `name`, or shorter columns"),
+        ));
     }
 
     let column = |c: &Col| {

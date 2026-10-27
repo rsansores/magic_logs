@@ -2,7 +2,7 @@
 // and written through a codec, so the host decides where it lives: in
 // memory, in the address bar, or in its router's query.
 
-import { customRef, getCurrentScope, onScopeDispose, ref, shallowRef, type Ref } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, ref, shallowRef, type Ref } from 'vue'
 import type { Codec } from '../core/codec.js'
 
 /** A ref for `key`, `initial` until something is set, read and written
@@ -24,18 +24,17 @@ export function urlStore(): Store {
   window.addEventListener('popstate', reread)
   if (getCurrentScope()) onScopeDispose(() => window.removeEventListener('popstate', reread))
 
-  return <T>(key: string, initial: T, codec: Codec<T>) =>
-    customRef<T>((track, trigger) => ({
-      get() {
-        track()
-        const raw = params.value.get(key)
-        return raw == null ? initial : (codec.parse(raw) ?? initial)
-      },
+  return <T>(key: string, initial: T, codec: Codec<T>): Ref<T> => {
+    // This key's own text: a write to another key leaves it, and whatever
+    // reads it, as they were.
+    const raw = computed(() => params.value.get(key))
+    return computed<T>({
+      get: () => (raw.value == null ? initial : (codec.parse(raw.value) ?? initial)),
       set(value) {
         const next = new URLSearchParams(window.location.search)
-        const raw = codec.serialize(value)
-        if (raw === codec.serialize(initial)) next.delete(key)
-        else next.set(key, raw)
+        const text = codec.serialize(value)
+        if (text === codec.serialize(initial)) next.delete(key)
+        else next.set(key, text)
         const query = next.toString()
         window.history.replaceState(
           window.history.state,
@@ -43,7 +42,7 @@ export function urlStore(): Store {
           `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
         )
         params.value = next
-        trigger()
       },
-    }))
+    })
+  }
 }

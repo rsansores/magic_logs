@@ -56,14 +56,17 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
 
     push(format!(
         "-- magic_logs: {table}, a hypertable of {chunk} chunks compressed after {after}, \
-         counted by hour, by day and by day and {top}.",
+         counted by hour{counts}.",
         table = qualified(spec.schema, spec.name),
         chunk = st.chunk,
         after = st.compress_after,
-        top = spec.top.map_or("nothing else", |t| t.name),
+        counts = spec.top.map_or(" and by day".to_owned(), |t| format!(
+            ", by day, and by day and {}",
+            t.name
+        )),
     ));
     push(format!(
-        "SELECT create_hypertable({}, by_range({}, INTERVAL {}),\n                         create_default_indexes => false);",
+        "SELECT create_hypertable({}, by_range({}, INTERVAL {}),\n                         create_default_indexes => false, migrate_data => true);",
         literal(&table),
         literal(spec.time),
         literal(st.chunk)
@@ -95,10 +98,12 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
     }
     push(indexes.join("\n"));
 
-    let segment = st
-        .segment_by
-        .map(|s| format!(",\n    timescaledb.segmentby = {}", literal(&ident(s))))
-        .unwrap_or_default();
+    // No segment_by is no segmenting, said: left out, TimescaleDB picks a
+    // column of its own, the id among them, which the order already uses.
+    let segment = format!(
+        ",\n    timescaledb.segmentby = {}",
+        literal(&st.segment_by.map(ident).unwrap_or_default())
+    );
     push(format!(
         "ALTER TABLE {table} SET (\n    timescaledb.enable_columnstore{segment},\n    timescaledb.orderby = {}\n);\nCALL add_columnstore_policy({}, after => INTERVAL {});",
         literal(&format!("{time} DESC, {id} DESC")),
@@ -106,18 +111,20 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         literal(st.compress_after)
     ));
 
-    let counted: Vec<String> = spec.counted().iter().map(|c| ident(c)).collect();
+    // `, "a", "b"`: nothing at all for a table that counts only its rows.
+    let listed = |columns: Vec<&str>| -> String {
+        columns.iter().map(|c| format!(", {}", ident(c))).collect()
+    };
+    let counted = listed(spec.counted());
     let hourly = qualified(spec.schema, &spec.relation(Tier::Hourly));
     push(format!(
         "CREATE MATERIALIZED VIEW {hourly}\nWITH (timescaledb.continuous, timescaledb.materialized_only = false) AS\n\
-         SELECT time_bucket(INTERVAL '1 hour', {time}) AS bucket, {cols}, count(*) AS events\n  FROM {table}\n GROUP BY bucket, {cols}\nWITH NO DATA;",
-        cols = counted.join(", ")
+         SELECT time_bucket(INTERVAL '1 hour', {time}) AS bucket{counted}, count(*) AS events\n  FROM {table}\n GROUP BY bucket{counted}\nWITH NO DATA;",
     ));
     let daily = qualified(spec.schema, &spec.relation(Tier::Daily));
     push(format!(
         "CREATE MATERIALIZED VIEW {daily}\nWITH (timescaledb.continuous, timescaledb.materialized_only = false) AS\n\
-         SELECT time_bucket(INTERVAL '1 day', bucket) AS bucket, {cols}, sum(events) AS events\n  FROM {hourly}\n GROUP BY 1, {cols}\nWITH NO DATA;",
-        cols = counted.join(", ")
+         SELECT time_bucket(INTERVAL '1 day', bucket) AS bucket{counted}, sum(events) AS events\n  FROM {hourly}\n GROUP BY 1{counted}\nWITH NO DATA;",
     ));
     let mut policies = vec![
         format!(
@@ -130,12 +137,11 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         ),
     ];
     if spec.top.is_some() {
-        let per_top: Vec<String> = spec.counted_per_top().iter().map(|c| ident(c)).collect();
+        let per_top = listed(spec.counted_per_top());
         let daily_top = qualified(spec.schema, &spec.relation(Tier::DailyTop));
         push(format!(
             "CREATE MATERIALIZED VIEW {daily_top}\nWITH (timescaledb.continuous, timescaledb.materialized_only = false) AS\n\
-             SELECT time_bucket(INTERVAL '1 day', {time}) AS bucket, {cols},\n       count(*) AS events, min({time}) AS first_at, max({time}) AS last_at\n  FROM {table}\n GROUP BY bucket, {cols}\nWITH NO DATA;",
-            cols = per_top.join(", ")
+             SELECT time_bucket(INTERVAL '1 day', {time}) AS bucket{per_top},\n       count(*) AS events, min({time}) AS first_at, max({time}) AS last_at\n  FROM {table}\n GROUP BY bucket{per_top}\nWITH NO DATA;",
         ));
         policies.push(format!(
             "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');",

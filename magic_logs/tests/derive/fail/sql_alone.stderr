@@ -1,0 +1,5 @@
+error: say what this column is to the explorer: `facet`, `filter`, `search`, …
+  --> tests/derive/fail/sql_alone.rs:12:9
+   |
+12 |     pub host: String,
+   |         ^^^^

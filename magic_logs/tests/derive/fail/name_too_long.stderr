@@ -1,0 +1,5 @@
+error: the migration would name `the_events_every_unit_of_the_fleet_has_ever_recorded_kind_at_idx`, longer than PostgreSQL's 63 bytes: a shorter `name`, or shorter columns
+ --> tests/derive/fail/name_too_long.rs:6:12
+  |
+6 | pub struct Event {
+  |            ^^^^^

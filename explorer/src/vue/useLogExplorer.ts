@@ -8,7 +8,15 @@ import { computed, getCurrentScope, onScopeDispose, ref, watch, type ComputedRef
 import { flag, instant, listOf, text, type Codec } from '../core/codec.js'
 import type { Question } from '../core/contract/types.js'
 import { narrowed as narrows } from '../core/facets.js'
-import { defaultPresets, rangeOf, stepFor, type Presets, type Range, type Step } from '../core/window.js'
+import {
+  defaultPresets,
+  presetOf,
+  rangeOf,
+  stepFor,
+  type Presets,
+  type Range,
+  type Step,
+} from '../core/window.js'
 import { memoryStore, type Store } from './store.js'
 
 export interface FieldOptions {
@@ -34,6 +42,9 @@ export interface LogExplorerOptions<F extends string> {
   keys?: Partial<Record<'window' | 'from' | 'to' | 'search' | 'live', string>>
   /** How often a live explorer's window slides to now, in ms (10 s). */
   liveEvery?: number
+  /** The longest a custom window may span, in ms (about two years): a longer
+   * one, typed or pasted into the address, reads as the preset shown first. */
+  longest?: number
 }
 
 export interface LogExplorer<F extends string = string> {
@@ -57,7 +68,11 @@ export interface LogExplorer<F extends string = string> {
   /** The cursors of the pages read so far: `undefined` for the first, then
    * each page's `next`. A changed question starts again from the newest. */
   cursors: Ref<(string | undefined)[]>
-  /** Reads the page after `next`, when there is one. */
+  /** Moves each time the question is asked again as it is (`refresh`): a
+   * host's data layer re-asks on it, as `useLogFetch` does. */
+  asked: Ref<number>
+  /** Reads the page after `next`, when there is one, and stops being live:
+   * the window holds still while a reader reads back through it. */
   more(next: string | null | undefined): void
   /** The window becomes `range`, and stops being live. */
   zoom(range: Range): void
@@ -67,7 +82,7 @@ export interface LogExplorer<F extends string = string> {
   toggle(field: F, value: string): void
   /** Unchooses every value and clears the search. */
   clear(): void
-  /** A named window slides to now: the same question, asked again. */
+  /** A named window slides to now, and every question is asked again. */
   refresh(): void
 }
 
@@ -75,11 +90,11 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   const store = options.store ?? memoryStore
   const presets = options.presets ?? defaultPresets
   const names = Object.keys(presets)
-  const initial = options.preset ?? ('24h' in presets ? '24h' : (names[0] ?? 'custom'))
+  const initial = options.preset ?? (presetOf(presets, '24h') ? '24h' : (names[0] ?? 'custom'))
   const key = (k: 'window' | 'from' | 'to' | 'search' | 'live', fallback: string) =>
     options.keys?.[k] ?? fallback
   const presetCodec: Codec<string> = {
-    parse: (raw) => (raw === 'custom' || raw in presets ? raw : undefined),
+    parse: (raw) => (raw === 'custom' || presetOf(presets, raw) ? raw : undefined),
     serialize: (v) => v,
   }
 
@@ -115,25 +130,39 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   )
   if (getCurrentScope()) onScopeDispose(() => clearInterval(ticking))
 
-  const range = computed(() =>
-    rangeOf({ preset: preset.value, from: from.value, to: to.value }, now.value, presets, initial),
-  )
-  const step = computed(() => stepFor(range.value.to.getTime() - range.value.from.getTime()))
-  const question = computed<Question>(() => {
+  // Each of these changes only when its value does: a write to the store
+  // that leaves the question as it was asks nothing again.
+  const range = computed<Range>((before) => {
+    const next = rangeOf(
+      { preset: preset.value, from: from.value, to: to.value },
+      now.value,
+      presets,
+      initial,
+      options.longest,
+    )
+    return before && sameRange(before, next) ? before : next
+  })
+  const step = computed<Step>((before) => {
+    const next = stepFor(range.value.to.getTime() - range.value.from.getTime())
+    return before?.name === next.name ? before : next
+  })
+  const question = computed<Question>((before) => {
     const chosen: Record<string, string[]> = {}
-    for (const f of fieldNames) if (fields[f].value.length) chosen[f] = fields[f].value
+    for (const f of fieldNames) if (fields[f].value.length) chosen[f] = [...fields[f].value]
     const text = search.value.trim()
-    return {
+    const next: Question = {
       from: range.value.from.toISOString(),
       to: range.value.to.toISOString(),
       fields: chosen,
       ...(text ? { search: text } : {}),
     }
+    return before && JSON.stringify(before) === JSON.stringify(next) ? before : next
   })
   const narrowed = computed(() => narrows(question.value))
 
   const cursors = ref<(string | undefined)[]>([undefined])
   watch(question, () => (cursors.value = [undefined]))
+  const asked = ref(0)
 
   return {
     preset,
@@ -149,8 +178,12 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     question,
     narrowed,
     cursors,
+    asked,
     more(next) {
-      if (next && !cursors.value.includes(next)) cursors.value = [...cursors.value, next]
+      if (!next || cursors.value.includes(next)) return
+      // Reading back through history holds the window still.
+      live.value = false
+      cursors.value = [...cursors.value, next]
     },
     zoom(next) {
       from.value = next.from.toISOString()
@@ -179,6 +212,11 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     },
     refresh() {
       now.value = Date.now()
+      asked.value++
     },
   }
+}
+
+function sameRange(a: Range, b: Range) {
+  return a.from.getTime() === b.from.getTime() && a.to.getTime() === b.to.getTime()
 }

@@ -1,0 +1,5 @@
+error: `bucket` is a column of the counts themselves: rename this one
+  --> tests/derive/fail/counts_own_name.rs:12:9
+   |
+12 |     pub bucket: String,
+   |         ^^^^^^

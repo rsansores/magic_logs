@@ -6,7 +6,8 @@ import type { Event } from './server.js'
 
 function query(q: Question, extra: Record<string, string | undefined> = {}) {
   const params = new URLSearchParams({ from: q.from, to: q.to })
-  for (const [field, values] of Object.entries(q.fields)) params.set(field, values.join(','))
+  // One parameter per value: a value may hold a comma.
+  for (const [field, values] of Object.entries(q.fields)) for (const v of values) params.append(field, v)
   if (q.search) params.set('search', q.search)
   for (const [key, value] of Object.entries(extra)) if (value) params.set(key, value)
   return params

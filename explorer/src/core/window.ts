@@ -30,16 +30,30 @@ export interface Range {
 
 /** The window as two instants, a named one ending at `now`. A preset
  * `presets` does not name looks back as far as `fallback`. */
-export function rangeOf(window: Window, now: number, presets: Presets, fallback: string): Range {
+export function rangeOf(
+  window: Window,
+  now: number,
+  presets: Presets,
+  fallback: string,
+  longest: number = LONGEST,
+): Range {
   if (window.preset === 'custom' && window.from && window.to) {
     const from = Date.parse(window.from)
     const to = Date.parse(window.to)
-    if (!Number.isNaN(from) && !Number.isNaN(to) && from < to)
-      return { from: new Date(from), to: new Date(to) }
+    if (from < to && to - from <= longest) return { from: new Date(from), to: new Date(to) }
   }
-  const back = presets[window.preset] ?? presets[fallback] ?? DAY
+  const back = presetOf(presets, window.preset) ?? presetOf(presets, fallback) ?? DAY
   return { from: new Date(now - back), to: new Date(now) }
 }
+
+/** How far back `name` looks, when `presets` names it as its own. */
+export function presetOf(presets: Presets, name: string): number | undefined {
+  const back = Object.hasOwn(presets, name) ? presets[name] : undefined
+  return typeof back === 'number' && Number.isFinite(back) && back > 0 ? back : undefined
+}
+
+/** The longest window a custom one may span: about two years, 800 daily bars. */
+export const LONGEST = 800 * DAY
 
 /** A histogram step: its name, for the host's request, and its span. A step
  * of whole hours or days is answered from magic_logs' counts. */

@@ -118,6 +118,17 @@ fn queries() -> String {
         .to_owned(),
     );
     add(
+        "histogram by day narrowed to one top: the counts per day and top",
+        histogram(
+            &spec,
+            &week.clone().with("unit_id", [Uuid::nil().to_string()]),
+            Duration::days(1),
+        )
+        .unwrap()
+        .sql()
+        .to_owned(),
+    );
+    add(
         "histogram by five minutes: the rows",
         histogram(&spec, &hours, Duration::minutes(5))
             .unwrap()
@@ -189,6 +200,22 @@ fn golden(file: &str, made: &str) {
 fn the_migration_is_the_one_checked_in() {
     let _ = columns;
     golden("migration.sql", &migration(&Event::SPEC, govern));
+}
+
+/// A table of a time and an id: counted by its rows alone.
+#[derive(MagicLog)]
+#[log(name = "pings", schema = "telemetry")]
+struct Ping {
+    #[log(id)]
+    id: i64,
+    #[log(time)]
+    at: DateTime<Utc>,
+}
+
+#[test]
+fn the_migration_of_a_table_that_counts_only_its_rows_is_the_one_checked_in() {
+    let _ = |p: Ping| (p.id, p.at);
+    golden("migration_minimal.sql", &migration(&Ping::SPEC, govern));
 }
 
 #[test]

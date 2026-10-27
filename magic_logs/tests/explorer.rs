@@ -63,6 +63,37 @@ fn plain(g: &Governed) -> String {
 }
 
 async fn setup(pool: &PgPool) {
+    setup_with(pool, plain).await
+}
+
+/// Each relation readable through a view that keeps one zone, when the
+/// session names one: the scope narrowing every tier alike.
+fn zoned(g: &Governed) -> String {
+    format!(
+        "CREATE VIEW \"{vs}\".\"{v}\" AS SELECT * FROM \"{s}\".\"{r}\" \
+          WHERE (SELECT coalesce(current_setting('test.zone', true), '')) = '' \
+             OR \"{scope}\" = (SELECT current_setting('test.zone', true))::uuid;",
+        vs = g.view_schema,
+        v = g.view,
+        s = g.schema,
+        r = g.relation,
+        scope = g.scope.unwrap(),
+    )
+}
+
+async fn refresh(pool: &PgPool) {
+    for tier in [Tier::Hourly, Tier::Daily, Tier::DailyTop] {
+        sqlx::query(&format!(
+            "CALL refresh_continuous_aggregate('private.{}', NULL, NULL)",
+            Event::SPEC.relation(tier)
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+async fn setup_with(pool: &PgPool, govern: fn(&Governed) -> String) {
     sqlx::raw_sql(
         "CREATE EXTENSION IF NOT EXISTS timescaledb; \
          CREATE TYPE level AS ENUM ('Info', 'Warning', 'Error'); \
@@ -74,7 +105,7 @@ async fn setup(pool: &PgPool) {
     .execute(pool)
     .await
     .unwrap();
-    sqlx::raw_sql(&migration(&Event::SPEC, plain))
+    sqlx::raw_sql(&migration(&Event::SPEC, govern))
         .execute(pool)
         .await
         .unwrap();
@@ -94,15 +125,7 @@ async fn setup(pool: &PgPool) {
     .execute(pool)
     .await
     .unwrap();
-    for tier in [Tier::Hourly, Tier::Daily, Tier::DailyTop] {
-        sqlx::query(&format!(
-            "CALL refresh_continuous_aggregate('private.{}', NULL, NULL)",
-            Event::SPEC.relation(tier)
-        ))
-        .execute(pool)
-        .await
-        .unwrap();
-    }
+    refresh(pool).await;
 }
 
 fn window(days: i64) -> Filter {
@@ -350,4 +373,271 @@ async fn the_json_an_explorer_reads_is_the_contract(pool: PgPool) {
         "explorer/src/core/contract/fixtures/answers.ts is not what the crate answers: \
          UPDATE_CONTRACT=1 rewrites it"
     );
+}
+
+/// The histogram of `filter` by `step`, from the tier it picks and from the
+/// rows (a search of nothing reads them), sorted alike.
+async fn both_histograms(
+    pool: &PgPool,
+    filter: &Filter,
+    step: Duration,
+) -> (Vec<Bucket>, Vec<Bucket>) {
+    let spec = Event::SPEC;
+    let counted: Vec<Bucket> = histogram(&spec, filter, step)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search(""), step)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    (counted, raw)
+}
+
+async fn both_facets(
+    pool: &PgPool,
+    filter: &Filter,
+    fields: &[&str],
+) -> (Vec<FacetCount>, Vec<FacetCount>) {
+    let spec = Event::SPEC;
+    let mut answers = Vec::new();
+    for f in [filter.clone(), filter.clone().search("")] {
+        let mut rows: Vec<FacetCount> = facets(&spec, &f, fields)
+            .unwrap()
+            .build_query_as()
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        rows.sort_by(|a, b| (&a.field, &a.value).cmp(&(&b.field, &b.value)));
+        answers.push(rows);
+    }
+    let raw = answers.pop().unwrap();
+    (answers.pop().unwrap(), raw)
+}
+
+#[sqlx::test(migrations = false)]
+async fn a_question_narrowed_to_one_top_reads_its_daily_counts(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    let unit = "00000000-0000-0000-0000-0000000000a2";
+    let filter = window(4).with("unit_id", [unit]).with("kind", ["door"]);
+    assert_eq!(
+        magic_logs::counts_tier(&spec, &filter, Some(Duration::days(1))),
+        Tier::DailyTop
+    );
+    let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
+    assert_eq!(counted, raw);
+    assert!(!counted.is_empty());
+    let (counted, raw) = both_facets(&pool, &filter, &["level", "kind", "unit_id"]).await;
+    assert_eq!(counted, raw);
+    // By the hour, the counts per day cannot answer: the rows do.
+    assert_eq!(
+        magic_logs::counts_tier(&spec, &filter, Some(Duration::hours(1))),
+        Tier::Raw
+    );
+}
+
+#[sqlx::test(migrations = false)]
+async fn a_window_that_begins_mid_bucket_counts_the_whole_bucket(pool: PgPool) {
+    setup(&pool).await;
+    let begins = day() + Duration::minutes(20);
+    let filter = Filter::new(begins, day() + Duration::hours(5));
+    let (counted, _) = both_histograms(&pool, &filter, Duration::hours(1)).await;
+    // The rows from the top of the first hour: [time_bucket(from), to).
+    let (_, whole) = both_histograms(
+        &pool,
+        &Filter::new(day(), day() + Duration::hours(5)),
+        Duration::hours(1),
+    )
+    .await;
+    assert_eq!(counted, whole);
+    let (_, exact) = both_histograms(&pool, &filter, Duration::hours(1)).await;
+    assert_ne!(counted, exact, "the rows answer to the second");
+}
+
+#[sqlx::test(migrations = false)]
+async fn new_rows_count_at_once_and_late_ones_after_the_refresh(pool: PgPool) {
+    setup(&pool).await;
+    let insert = |at: DateTime<Utc>| {
+        format!(
+            "INSERT INTO private.events SELECT gen_random_uuid(), '{}'::timestamptz + n * interval '1 second', \
+             '{TENANT}', '00000000-0000-0000-0000-000000000001', 'Error', 'door', \
+             '00000000-0000-0000-0000-0000000000a1', NULL, 'late' FROM generate_series(1, 25) n",
+            at.to_rfc3339()
+        )
+    };
+    let filter = window(6);
+    // After everything refreshed: read from what is not materialized yet.
+    sqlx::raw_sql(&insert(day() + Duration::days(5)))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
+    assert_eq!(counted, raw, "a new row counts before any refresh");
+
+    // Into a day already counted: missing until the refresh recounts it.
+    sqlx::raw_sql(&insert(day() + Duration::days(1) + Duration::hours(3)))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
+    assert_ne!(counted, raw);
+    refresh(&pool).await;
+    let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
+    assert_eq!(counted, raw, "the refresh recounts the late day");
+}
+
+#[sqlx::test(migrations = false)]
+async fn compressed_history_pages_and_counts_as_it_did(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    let filter = window(4).with("kind", ["power"]);
+    let pages = |pool: PgPool| {
+        let filter = filter.clone();
+        async move {
+            let mut out = Vec::new();
+            let mut after: Option<Cursor> = None;
+            loop {
+                let rows: Vec<Event> = page(&spec, &filter, after.as_ref(), 40)
+                    .unwrap()
+                    .build_query_as()
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+                let Some(last) = rows.last() else { break };
+                after = Some(Cursor {
+                    time: last.at,
+                    id: last.id.to_string(),
+                });
+                out.extend(rows.iter().map(|e| (e.at, e.id)));
+            }
+            out
+        }
+    };
+    let before = pages(pool.clone()).await;
+    let (counted_before, _) = both_histograms(&pool, &filter, Duration::days(1)).await;
+    let compressed: i64 =
+        sqlx::query_scalar("SELECT count(compress_chunk(c)) FROM show_chunks('private.events') c")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(compressed >= 4);
+    assert_eq!(pages(pool.clone()).await, before);
+    let powered: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM private.events WHERE kind = 'power'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(before.len() as i64, powered);
+    let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
+    assert_eq!(counted, counted_before);
+    assert_eq!(counted, raw);
+}
+
+#[sqlx::test(migrations = false)]
+async fn a_scoped_reader_counts_only_its_scope_in_every_tier(pool: PgPool) {
+    setup_with(&pool, zoned).await;
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('test.zone', '00000000-0000-0000-0000-000000000001', true)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let spec = Event::SPEC;
+    for (filter, step) in [
+        (window(1), Duration::hours(1)),
+        (window(4), Duration::days(1)),
+        (
+            window(4).with("unit_id", ["00000000-0000-0000-0000-0000000000a1"]),
+            Duration::days(1),
+        ),
+    ] {
+        let counted: Vec<Bucket> = histogram(&spec, &filter, step)
+            .unwrap()
+            .build_query_as()
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
+        let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search(""), step)
+            .unwrap()
+            .build_query_as()
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
+        assert_eq!(counted, raw, "{filter:?}");
+    }
+    let zones: Vec<FacetCount> = facets(&spec, &window(4), &["zone_id"])
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(zones.len(), 1, "one zone is all this reader sees");
+}
+
+#[sqlx::test(migrations = false)]
+async fn a_search_reads_its_text_as_typed(pool: PgPool) {
+    setup(&pool).await;
+    sqlx::raw_sql(&format!(
+        "INSERT INTO private.events SELECT gen_random_uuid(), '{at}'::timestamptz + n * interval '1 minute', \
+         '{TENANT}', '00000000-0000-0000-0000-000000000001', 'Info', 'cpu', \
+         '00000000-0000-0000-0000-0000000000a1', NULL, \
+         CASE WHEN n % 2 = 0 THEN 'cpu at 50% now' ELSE 'cpu at 507 now\\' END \
+         FROM generate_series(1, 20) n",
+        at = (day() + Duration::hours(2)).to_rfc3339()
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = |text: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let rows: Vec<Event> = page(&Event::SPEC, &window(1).search(text), None, 1000)
+                .unwrap()
+                .build_query_as()
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+            rows.len()
+        }
+    };
+    assert_eq!(found("50%").await, 10);
+    assert_eq!(found("now\\").await, 10);
+    assert_eq!(found("cpu_at").await, 0);
+}
+
+#[sqlx::test(migrations = false)]
+async fn a_table_of_only_a_time_and_an_id_is_made_a_log_table(pool: PgPool) {
+    #[derive(MagicLog)]
+    #[log(name = "pings", schema = "private", view_schema = "public")]
+    struct Ping {
+        #[log(id)]
+        id: i64,
+        #[log(time)]
+        at: DateTime<Utc>,
+    }
+    let _ = |p: Ping| (p.id, p.at);
+    sqlx::raw_sql(
+        "CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE SCHEMA private; \
+         CREATE TABLE private.pings (id bigint NOT NULL, at timestamptz NOT NULL, PRIMARY KEY (id, at)); \
+         INSERT INTO private.pings SELECT n, '2026-10-01'::timestamptz + n * interval '1 minute' \
+           FROM generate_series(1, 300) n;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(&migration(&Ping::SPEC, plain))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let bars: Vec<Bucket> = histogram(&Ping::SPEC, &window(1), Duration::hours(1))
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(bars.iter().map(|b| b.count).sum::<i64>(), 300);
 }

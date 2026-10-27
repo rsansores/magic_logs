@@ -18,9 +18,13 @@ pub struct Filter {
     /// Where it ends, exclusive.
     pub to: DateTime<Utc>,
     /// `(field, values)`: the row's value of `field` is one of `values`,
-    /// written as SQL reads the field's type from text.
+    /// written as SQL reads the field's type from text — the database casts
+    /// them, and refuses one that does not read (`22P02`). An empty list
+    /// leaves the field unfiltered; no list selects the rows without a value
+    /// (`NULL`), which a facet counts as `None`.
     pub fields: Vec<(String, Vec<String>)>,
-    /// Text the searched columns contain.
+    /// Text the searched columns contain, as typed: `%`, `_` and `\\` are
+    /// themselves, not patterns.
     pub search: Option<String>,
 }
 
@@ -35,7 +39,8 @@ impl Filter {
         }
     }
 
-    /// The rows whose `field` is one of `values`.
+    /// The rows whose `field` is one of `values`; an empty `values` leaves
+    /// the field unfiltered.
     pub fn with(
         mut self,
         field: &str,
@@ -142,34 +147,59 @@ const DAILY_FROM: i64 = 3;
 /// The counts that answer `filter`, or the rows: in buckets of `step` for a
 /// histogram, whole for a facet. Per day for a step of whole days, or a
 /// facet over more than three days; per hour for a step of whole hours, or a
-/// shorter facet; the rows for a finer step, a search, or a field the counts
-/// do not keep.
+/// shorter facet; per day and `top` for a daily question that names the
+/// `top`; the rows for a finer step, a search, or a field the counts do not
+/// keep.
 pub fn counts_tier(spec: &Spec, filter: &Filter, step: Option<Duration>) -> Tier {
-    let kept = filter
-        .named()
-        .all(|name| spec.field(name).is_some_and(|f| f.counted));
+    tier_keeping(spec, filter, step, None)
+}
+
+/// [`counts_tier`], of a tier that also keeps the column `also` (a facet's).
+fn tier_keeping(spec: &Spec, filter: &Filter, step: Option<Duration>, also: Option<&str>) -> Tier {
     let whole = |unit: Duration| {
         step.is_none_or(|s| s >= unit && s.num_seconds() % unit.num_seconds() == 0)
     };
-    if !kept || filter.search.is_some() || !whole(Duration::hours(1)) {
-        Tier::Raw
-    } else if match step {
+    if filter.search.is_some() || !whole(Duration::hours(1)) {
+        return Tier::Raw;
+    }
+    let daily = match step {
         Some(_) => whole(Duration::days(1)),
         None => filter.to - filter.from > Duration::days(DAILY_FROM),
-    } {
-        Tier::Daily
+    };
+    let kept_in = |tier| {
+        filter
+            .named()
+            .chain(also)
+            .all(|name| keeps(spec, tier, name))
+    };
+    if kept_in(Tier::Hourly) {
+        if daily {
+            Tier::Daily
+        } else {
+            Tier::Hourly
+        }
+    } else if daily && spec.top.is_some() && kept_in(Tier::DailyTop) {
+        Tier::DailyTop
     } else {
-        Tier::Hourly
+        Tier::Raw
+    }
+}
+
+/// Whether `tier` keeps the column `name`.
+fn keeps(spec: &Spec, tier: Tier, name: &str) -> bool {
+    match tier {
+        Tier::Raw => true,
+        Tier::Hourly | Tier::Daily => spec.field(name).is_some_and(|f| f.counted),
+        Tier::DailyTop => {
+            spec.top.is_some_and(|t| t.name == name) || spec.field(name).is_some_and(|f| f.per_top)
+        }
     }
 }
 
 /// The counts per `top` that answer `filter`, or the rows.
 pub fn per_top_tier(spec: &Spec, filter: &Filter) -> Tier {
-    let top = spec.top.map(|t| t.name);
-    let kept = filter
-        .named()
-        .all(|name| Some(name) == top || spec.field(name).is_some_and(|f| f.per_top));
-    if !kept || filter.search.is_some() {
+    let kept = filter.named().all(|name| keeps(spec, Tier::DailyTop, name));
+    if spec.top.is_none() || !kept || filter.search.is_some() {
         Tier::Raw
     } else {
         Tier::DailyTop
@@ -241,7 +271,7 @@ fn push_where(
                 qb.push(format!("{f}("));
             }
             qb.push("'%' || ");
-            qb.push_bind(text.clone());
+            qb.push_bind(like_escaped(text));
             qb.push(" || '%'");
             if spec.search_with.is_some() {
                 qb.push(")");
@@ -260,10 +290,17 @@ pub fn page(
     limit: i64,
 ) -> Result<QueryBuilder<'static, Postgres>, Error> {
     filter.check(spec)?;
+    if limit < 0 {
+        return Err(Error::Limit);
+    }
     let (time, id) = (ident(spec.time), ident(spec.id.name));
     let mut qb = QueryBuilder::new(format!("SELECT * FROM {}", source(spec, Tier::Raw)));
     push_where(&mut qb, spec, filter, Tier::Raw, None);
     if let Some(cursor) = cursor {
+        // The time alone bounds the chunks read: TimescaleDB excludes chunks,
+        // and compressed segments, by a column's range, not by a row's.
+        qb.push(format!(" AND {time} <= "));
+        qb.push_bind(cursor.time);
         qb.push(format!(" AND ({time}, {id}) < ("));
         qb.push_bind(cursor.time);
         qb.push(", ");
@@ -283,6 +320,9 @@ pub fn histogram(
     step: Duration,
 ) -> Result<QueryBuilder<'static, Postgres>, Error> {
     filter.check(spec)?;
+    if step <= Duration::zero() {
+        return Err(Error::Step);
+    }
     let tier = counts_tier(spec, filter, Some(step));
     let level = spec.level.map_or("NULL::text".to_owned(), |l| {
         format!("{}::text", ident(l.name))
@@ -323,12 +363,7 @@ pub fn facets(
         let tier = if Some(*name) == top {
             per_top_tier(spec, &alone)
         } else {
-            match counts_tier(spec, &alone, None) {
-                Tier::Hourly | Tier::Daily if !spec.field(name).is_some_and(|f| f.counted) => {
-                    Tier::Raw
-                }
-                tier => tier,
-            }
+            tier_keeping(spec, &alone, None, Some(name))
         };
         let count = if tier == Tier::Raw {
             "count(*)"
@@ -362,6 +397,9 @@ pub fn grouped(
     limit: i64,
 ) -> Result<QueryBuilder<'static, Postgres>, Error> {
     filter.check(spec)?;
+    if limit < 0 {
+        return Err(Error::Limit);
+    }
     let top = spec.top.ok_or(Error::NoTop)?;
     let field = spec
         .field(by)
@@ -392,6 +430,18 @@ pub fn grouped(
     qb.push(" GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT ");
     qb.push_bind(limit);
     Ok(qb)
+}
+
+/// `text` as LIKE reads it literally: its `\\`, `%` and `_` escaped.
+fn like_escaped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn literal(text: &str) -> String {

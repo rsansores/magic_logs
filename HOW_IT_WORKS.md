@@ -51,8 +51,11 @@ chunk, 30 ms; 1,000 rows into a compressed day twenty days back, 13 s, the
 whole day recounted; a backlog of 105,000 rows spread over twenty-one
 days, about six minutes. That runs in the background job, not in a reader's
 request, and a fleet of devices that reconnect after weeks keeps the job
-busy rather than the readers waiting. No window is cut off: a count never
-misses a row because it arrived late.
+busy rather than the readers waiting. No window is cut off: a late row is
+counted by the next refresh of each count — within five minutes for the
+hourly and per-`top` counts, within the hour for the daily — and until then
+the counts of its bucket are short of the rows by it. A row newer than the
+last refresh is counted at once (real-time aggregation).
 
 ## Which question reads what
 
@@ -70,6 +73,10 @@ field it names:
   filter names, and the grouped one, are kept there;
 - a **page** always reads the rows.
 
+A question that names the `top` (one unit) and asks by whole days reads
+the counts per day and `top`, when every other field it names is kept
+there (`per_top`): the hourly and daily counts do not keep the `top`.
+
 A count is of whole buckets: the window `[from, to)` takes every bucket
 that begins in `[time_bucket(from), to)`. A window from 10:20 counts from
 10:00 in the hourly counts and from midnight UTC in the daily ones; the
@@ -86,8 +93,11 @@ and the fields are one statement (`UNION ALL`): one round trip.
 
 ## Pages
 
-`page` is keyset: `WHERE (time, id) < (cursor) ORDER BY time DESC, id DESC
-LIMIT n`. Page fifty costs what page one costs. An id type the host's
+`page` is keyset: `WHERE time <= cursor.time AND (time, id) < (cursor)
+ORDER BY time DESC, id DESC LIMIT n`. The first condition says the same as
+the second, in the form TimescaleDB excludes chunks — and compressed
+segments — by: without it, a page in history opens every chunk newer than
+its cursor. Page fifty costs what page one costs. An id type the host's
 column has (`uuid`, `bigint`) is cast from the cursor's text, so the cursor
 crosses an HTTP boundary as a string. There is no total: a count of the
 window is the histogram's sum.

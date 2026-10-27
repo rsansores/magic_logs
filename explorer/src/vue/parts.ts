@@ -15,7 +15,7 @@ import type { Bucket, FacetCountRow } from '../core/contract/types.js'
 import { facetOf, type FacetItem } from '../core/facets.js'
 import { geometry, selection, type Bar, type Geometry } from '../core/histogram.js'
 import type { Range } from '../core/window.js'
-import type { LogAnswers } from './useLogFetch.js'
+import type { Answered, LogAnswers } from './useLogFetch.js'
 import type { LogExplorer } from './useLogExplorer.js'
 
 export interface Histogram {
@@ -35,17 +35,25 @@ export interface Histogram {
   zoomTo(bar: Bar): void
 }
 
+/** The histogram of `buckets`, stacked by `levels`, drawn on the window and
+ * step they answer (`answered`, as `useLogFetch` keeps them) — the
+ * explorer's own when left out — and brushed to zoom the explorer. */
 export function useHistogram(
-  explorer: LogExplorer,
+  explorer: MaybeRefOrGetter<LogExplorer>,
   buckets: MaybeRefOrGetter<readonly Bucket[]>,
   levels: MaybeRefOrGetter<readonly string[] | undefined> = undefined,
+  answered: MaybeRefOrGetter<Answered | null | undefined> = undefined,
 ): Histogram {
+  const on = computed<Answered>(() => {
+    const e = toValue(explorer)
+    return toValue(answered) ?? { range: e.range.value, step: e.step.value }
+  })
   const drawn = computed(() =>
-    geometry(toValue(buckets), explorer.range.value, explorer.step.value.ms, toValue(levels) ?? []),
+    geometry(toValue(buckets), on.value.range, on.value.step.ms, toValue(levels) ?? []),
   )
   const brush = shallowRef<{ a: number; b: number } | null>(null)
 
-  const span = (a: number, b: number): Range => selection(explorer.range.value, a, b, explorer.step.value.ms)
+  const span = (a: number, b: number): Range => selection(on.value.range, a, b, on.value.step.ms)
   const at = (event: PointerEvent) => {
     const box = (event.currentTarget as Element).getBoundingClientRect()
     return box.width ? (event.clientX - box.left) / box.width : 0
@@ -54,8 +62,8 @@ export function useHistogram(
   const brushed = computed(() => {
     if (!brush.value) return null
     const { from, to } = span(brush.value.a, brush.value.b)
-    const start = explorer.range.value.from.getTime()
-    const width = explorer.range.value.to.getTime() - start
+    const start = on.value.range.from.getTime()
+    const width = on.value.range.to.getTime() - start
     const x = Math.max((from.getTime() - start) / width, 0)
     return { x, width: Math.min((to.getTime() - start) / width, 1) - x }
   })
@@ -77,14 +85,14 @@ export function useHistogram(
         if (!brush.value) return
         const { a, b } = brush.value
         brush.value = null
-        explorer.zoom(span(a, b))
+        toValue(explorer).zoom(span(a, b))
       },
       onPointercancel() {
         brush.value = null
       },
     },
     zoomTo(bar) {
-      explorer.zoom({ from: new Date(bar.at), to: new Date(bar.end) })
+      toValue(explorer).zoom({ from: new Date(bar.at), to: new Date(bar.end) })
     },
   }
 }
@@ -98,18 +106,27 @@ export interface Facet {
   clear(): void
 }
 
+/** One field's values among `rows` (`facets`' answer), and what choosing
+ * them does to the explorer. */
 export function useFacet<F extends string>(
-  explorer: LogExplorer<F>,
+  explorer: MaybeRefOrGetter<LogExplorer<F>>,
   rows: MaybeRefOrGetter<readonly FacetCountRow[]>,
-  field: F,
+  field: MaybeRefOrGetter<F>,
 ): Facet {
-  const chosen = computed(() => explorer.fields[field].value)
+  const chosenRef = () => {
+    const e = toValue(explorer)
+    const name = toValue(field)
+    const ref = e.fields[name]
+    if (!ref) throw new Error(`the explorer has no field "${name}": it has ${e.fieldNames.join(', ')}`)
+    return ref
+  }
+  const chosen = computed(() => chosenRef().value)
   return {
-    items: computed(() => facetOf(toValue(rows), field, chosen.value)),
+    items: computed(() => facetOf(toValue(rows), toValue(field), chosen.value)),
     chosen,
-    toggle: (value) => explorer.toggle(field, value),
-    only: (value) => (explorer.fields[field].value = [value]),
-    clear: () => (explorer.fields[field].value = []),
+    toggle: (value) => toValue(explorer).toggle(toValue(field), value),
+    only: (value) => (chosenRef().value = [value]),
+    clear: () => (chosenRef().value = []),
   }
 }
 

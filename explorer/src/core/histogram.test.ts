@@ -67,6 +67,22 @@ describe('geometry', () => {
   })
 })
 
+describe('the scale', () => {
+  it('ticks in whole numbers for every top', () => {
+    for (const top of [1, 2, 5, 10, 20, 50, 100, 200, 500]) {
+      const { counts, max } = geometry([{ at: at(0), counts: { info: top } }], range, HOUR)
+      expect(max).toBe(top)
+      expect(counts.every((t) => Number.isInteger(t.value))).toBe(true)
+      expect(counts.at(-1)!.value).toBe(top)
+    }
+  })
+
+  it('takes a window of many thousands of bars without a stack overflow', () => {
+    const long = { from: new Date(at(0)), to: new Date(at(0) + 200_000 * 60_000) }
+    expect(geometry([], long, 60_000).bars).toHaveLength(200_000)
+  })
+})
+
 describe('niceMax', () => {
   it('rounds up to 1, 2 or 5 × 10ⁿ', () => {
     expect([0, 1, 3, 7, 10, 11, 180, 4321].map(niceMax)).toEqual([0, 1, 5, 10, 10, 20, 200, 5000])

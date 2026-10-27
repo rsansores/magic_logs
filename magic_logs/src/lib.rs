@@ -99,6 +99,12 @@ pub enum Error {
     /// A filter searches a table with no `#[log(search)]` column.
     #[error("the table searches no column")]
     NothingSearched,
+    /// A histogram's step is zero, or less.
+    #[error("the step is not positive")]
+    Step,
+    /// A page or a grouping asked for fewer than no rows.
+    #[error("the limit is negative")]
+    Limit,
     /// `grouped` asked of a table with no `#[log(top)]`.
     #[error("the table has no `top` to group by")]
     NoTop,

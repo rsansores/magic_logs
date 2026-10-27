@@ -31,19 +31,23 @@ const titles: Record<string, string> = { level: 'Level', kind: 'Kind', zone: 'Zo
 const presetNames: Record<string, string> = { '1h': '1 h', '24h': '24 h', '7d': '7 d', '30d': '30 d' }
 
 const number = new Intl.NumberFormat('en')
+// TimescaleDB buckets in UTC: a day's bar begins at midnight UTC, and its
+// label says that day wherever the reader is.
 const time = new Intl.DateTimeFormat('en', {
   hour: '2-digit',
   minute: '2-digit',
-  second: '2-digit',
   hour12: false,
+  timeZone: 'UTC',
 })
-const day = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' })
+const day = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+// Every time on the page is UTC, as the bars are counted.
 const moment = new Intl.DateTimeFormat('en', {
   month: 'short',
   day: 'numeric',
   hour: '2-digit',
   minute: '2-digit',
   hour12: false,
+  timeZone: 'UTC',
 })
 const kindNames: Record<string, string> = {
   engine_start: 'Engine start',
@@ -57,15 +61,17 @@ const kindNames: Record<string, string> = {
 }
 const label = (s: string) => kindNames[s] ?? s
 
+// What the bars count: every filter applies (a facet's own count leaves
+// out its own field's filter).
 const total = computed(() =>
-  answers.facets.value.filter((f) => f.field === 'level').reduce((s, f) => s + f.count, 0),
+  answers.buckets.value.reduce((n, b) => n + Object.values(b.counts).reduce((s, c) => s + c, 0), 0),
 )
 const chosen = computed(() =>
   explorer.fieldNames.flatMap((field) => explorer.fields[field].value.map((value) => ({ field, value }))),
 )
 const tickLabel = (at: number) => {
   const span = explorer.range.value.to.getTime() - explorer.range.value.from.getTime()
-  return span > 2 * 86_400_000 ? day.format(at) : time.format(at).slice(0, 5)
+  return span > 2 * 86_400_000 ? day.format(at) : time.format(at)
 }
 const busiest = (rows: { count: number }[]) => Math.max(1, ...rows.map((r) => r.count))
 const hovered = ref<number | null>(null)
@@ -145,7 +151,7 @@ const hovered = ref<number | null>(null)
               <strong>{{ number.format(total) }}</strong> events
               <span class="muted">
                 · {{ moment.format(explorer.range.value.from) }} –
-                {{ moment.format(explorer.range.value.to) }} · by
+                {{ moment.format(explorer.range.value.to) }} UTC · by
                 {{ explorer.step.value.name.replace(/([A-Z])/g, ' $1').toLowerCase() }}
               </span>
             </div>
@@ -236,11 +242,11 @@ const hovered = ref<number | null>(null)
         </div>
 
         <section v-if="view === 'rows'" class="card table">
-          <LogRows v-slot="{ rows, more, loadMore, loading }">
+          <LogRows :answers="answers" v-slot="{ rows, more, loadMore, loading }">
             <table>
               <thead>
                 <tr>
-                  <th>Time</th>
+                  <th>Time (UTC)</th>
                   <th>Level</th>
                   <th>Kind</th>
                   <th>Unit</th>
@@ -249,9 +255,9 @@ const hovered = ref<number | null>(null)
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="e in rows as Event[]" :key="e.id">
+                <tr v-for="e in rows" :key="e.id">
                   <td class="mono">
-                    {{ moment.format(e.at) }}:{{ String(new Date(e.at).getSeconds()).padStart(2, '0') }}
+                    {{ moment.format(e.at) }}:{{ String(new Date(e.at).getUTCSeconds()).padStart(2, '0') }}
                   </td>
                   <td>
                     <span class="pill" :class="`lv-${e.level}`">{{ e.level }}</span>

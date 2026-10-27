@@ -1,0 +1,257 @@
+// @vitest-environment happy-dom
+import { mount } from '@vue/test-utils'
+import { effectScope, nextTick, watch } from 'vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { listOf, text } from '../core/codec.js'
+import FacetHost from './FacetHost.test.vue'
+import LogRows from './LogRows.vue'
+import { useHistogram } from './parts.js'
+import { urlStore } from './store.js'
+import { useLogExplorer } from './useLogExplorer.js'
+import { useLogFetch, type LogFetchers } from './useLogFetch.js'
+
+const HOUR = 3_600_000
+const now = Date.UTC(2026, 9, 1, 12)
+
+function at(path: string) {
+  window.history.replaceState(null, '', path)
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ now, toFake: ['setTimeout', 'setInterval', 'clearInterval', 'clearTimeout', 'Date'] })
+  at('/')
+})
+afterEach(() => vi.useRealTimers())
+
+function scoped<T>(make: () => T) {
+  const scope = effectScope()
+  return { value: scope.run(make)!, scope }
+}
+
+/** Fetchers that count what they are asked, answering after `delay` ms. */
+function counting(delay = 0, page?: LogFetchers<{ id: string }>['page']) {
+  const asked = { histogram: 0, facets: 0, page: 0, grouped: 0 }
+  const later = <T>(v: T) => new Promise<T>((r) => setTimeout(() => r(v), delay))
+  const fetchers: LogFetchers<{ id: string }> = {
+    histogram: (_q, step) => (
+      asked.histogram++,
+      later([{ bucket: new Date(now - HOUR).toISOString(), level: step.name, count: 1 }])
+    ),
+    facets: () => (asked.facets++, later([{ field: 'kind', value: 'door', count: 3 }])),
+    page:
+      page ??
+      ((_q, cursor) => (
+        asked.page++,
+        later({ rows: [{ id: cursor ?? 'first' }], next: cursor ? null : 'c1' })
+      )),
+    grouped: () => (asked.grouped++, later([])),
+  }
+  return { asked, fetchers }
+}
+
+describe('urlStore', () => {
+  it('reads the address, writes it back in place, and leaves out what equals its start', () => {
+    at('/explore?q=gate&kind=a,b#top')
+    const { value: store, scope } = scoped(() => urlStore())
+    const q = store('q', '', text)
+    const kind = store('kind', [], listOf())
+    expect(q.value).toBe('gate')
+    expect(kind.value).toEqual(['a', 'b'])
+    const length = window.history.length
+    q.value = 'seal'
+    expect(window.location.search).toBe('?q=seal&kind=a%2Cb')
+    expect(window.location.hash).toBe('#top')
+    kind.value = []
+    expect(window.location.search).toBe('?q=seal')
+    expect(window.history.length).toBe(length)
+    scope.stop()
+  })
+
+  it('follows the back button', async () => {
+    const { value: store, scope } = scoped(() => urlStore())
+    const q = store('q', '', text)
+    at('/?q=back')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await nextTick()
+    expect(q.value).toBe('back')
+    scope.stop()
+  })
+
+  it('does not move a key when another is written', async () => {
+    const { value, scope } = scoped(() => {
+      const store = urlStore()
+      const q = store('q', '', text)
+      const view = store('view', 'rows', text)
+      let moved = 0
+      watch(q, () => moved++)
+      return { view, moved: () => moved }
+    })
+    value.view.value = 'grouped'
+    await nextTick()
+    expect(value.moved()).toBe(0)
+    scope.stop()
+  })
+})
+
+describe('useLogExplorer over the address', () => {
+  it('reads a hostile window as the default one', () => {
+    at('/?window=toString&from=0001-01-01T00:00:00Z&to=9999-01-01T00:00:00Z')
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: ['kind'], store: urlStore() }))
+    expect(Date.parse(e.question.value.to) - Date.parse(e.question.value.from)).toBe(24 * HOUR)
+    scope.stop()
+  })
+})
+
+describe('useLogFetch', () => {
+  it('asks nothing again for a write that leaves the question as it was', async () => {
+    const { value, scope } = scoped(() => {
+      const store = urlStore()
+      const e = useLogExplorer({ fields: ['kind'], store })
+      const view = store('view', 'rows', text)
+      const c = counting()
+      const answers = useLogFetch(e, c.fetchers)
+      return { e, view, c, answers }
+    })
+    await vi.runAllTimersAsync()
+    value.e.more(value.answers.next.value)
+    await vi.runAllTimersAsync()
+    expect(value.answers.rows.value).toHaveLength(2)
+    const before = { ...value.c.asked }
+
+    value.view.value = 'grouped'
+    value.e.clear()
+    await vi.runAllTimersAsync()
+    expect(value.c.asked).toEqual(before)
+    expect(value.answers.rows.value).toHaveLength(2)
+
+    value.e.refresh()
+    await vi.runAllTimersAsync()
+    expect(value.c.asked.histogram).toBe(before.histogram + 1)
+    scope.stop()
+  })
+
+  it('does not slide a zoomed window, live or not', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 20 })
+      const c = counting()
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.zoom({ from: new Date(now - 3 * HOUR), to: new Date(now - HOUR) })
+    await vi.runAllTimersAsync()
+    const before = value.c.asked.histogram
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(200)
+    expect(value.c.asked.histogram).toBe(before)
+    scope.stop()
+  })
+
+  it('lets a slow server answer while live, and asks the newest question after', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(2_500)
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.live.value = true
+    // Two slides while the first answers are on their way: they land, and
+    // the newest question is asked once, right after.
+    await vi.advanceTimersByTimeAsync(2_600)
+    expect(value.answers.buckets.value).toHaveLength(1)
+    expect(value.c.asked.histogram).toBe(2)
+    await vi.advanceTimersByTimeAsync(2_600)
+    expect(value.c.asked.histogram).toBe(3)
+    scope.stop()
+  })
+
+  it('asks again for a page that failed', async () => {
+    let fail = true
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'] })
+      const c = counting(0, async (_q, cursor) => {
+        if (cursor && fail) throw new Error('503')
+        return { rows: [{ id: cursor ?? 'first' }], next: cursor ? null : 'c1' }
+      })
+      return { e, answers: useLogFetch(e, c.fetchers) }
+    })
+    await vi.runAllTimersAsync()
+    value.e.more(value.answers.next.value)
+    await vi.runAllTimersAsync()
+    expect(value.answers.error.value).toBeInstanceOf(Error)
+    expect(value.e.cursors.value).toEqual([undefined])
+    fail = false
+    value.e.more(value.answers.next.value)
+    await vi.runAllTimersAsync()
+    expect(value.answers.rows.value.map((r) => r.id)).toEqual(['first', 'c1'])
+    scope.stop()
+  })
+
+  it('draws the buckets on the step they answer until the next answer', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'] })
+      const c = counting(1_000)
+      const answers = useLogFetch(e, c.fetchers)
+      const histogram = useHistogram(e, answers.buckets, undefined, answers.bucketsAnswer)
+      return { e, answers, histogram }
+    })
+    const width = () => {
+      const bar = value.histogram.geometry.value.bars[1]!
+      return bar.end - bar.at
+    }
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(width()).toBe(HOUR)
+    value.e.choose('7d')
+    await nextTick()
+    expect(width()).toBe(HOUR)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(width()).toBe(6 * HOUR)
+    scope.stop()
+  })
+})
+
+describe('useHistogram', () => {
+  it('brushes across the plot and zooms to whole steps', () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: [], preset: '24h' })
+      return { e, h: useHistogram(e, []) }
+    })
+    const plot = document.createElement('div')
+    plot.getBoundingClientRect = () => ({ left: 100, width: 240 }) as DOMRect
+    const event = (x: number) =>
+      ({ button: 0, pointerId: 1, clientX: x, currentTarget: plot }) as unknown as PointerEvent
+    // Ten pixels an hour: from 1 h into the window to 3.5 h, widened to
+    // whole hours, 1 h to 4 h.
+    value.h.handlers.onPointerdown(event(100 + 10))
+    value.h.handlers.onPointermove(event(100 + 35))
+    expect(value.h.brushed.value!.x).toBeCloseTo(1 / 24)
+    expect(value.h.brushed.value!.width).toBeCloseTo(3 / 24)
+    value.h.handlers.onPointerup(event(100 + 35))
+    expect(value.e.preset.value).toBe('custom')
+    expect(Date.parse(value.e.from.value)).toBe(now - 23 * HOUR)
+    expect(Date.parse(value.e.to.value) - Date.parse(value.e.from.value)).toBe(3 * HOUR)
+    expect(value.h.brushed.value).toBeNull()
+    scope.stop()
+  })
+})
+
+describe('the renderless parts', () => {
+  it('follow the props they are given', async () => {
+    const e = useLogExplorer({ fields: ['kind', 'zone'] })
+    const c = counting()
+    c.fetchers.facets = async () => [
+      { field: 'kind', value: 'door', count: 3 },
+      { field: 'zone', value: 'north', count: 7 },
+    ]
+    const answers = useLogFetch(e, c.fetchers)
+    const wrapper = mount(FacetHost, { props: { explorer: e, answers, field: 'kind' } })
+    await vi.runAllTimersAsync()
+    expect(wrapper.text()).toBe('door')
+    await wrapper.setProps({ field: 'zone' })
+    expect(wrapper.text()).toBe('north')
+    wrapper.unmount()
+  })
+
+  it('refuse a part drawn outside a root, by name', () => {
+    expect(() => mount(LogRows, { slots: { default: () => 'x' } })).toThrow(
+      /<LogRows> is drawn inside <LogExplorerRoot>/,
+    )
+  })
+})

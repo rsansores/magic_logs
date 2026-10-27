@@ -53,7 +53,9 @@ the window, the facets, the histogram's geometry and its brush, the pages
   the Apache-2.0-only build), preloaded.
 - Rust 1.85 or later; sqlx 0.8.
 - The table, already there with its columns and a primary key that holds
-  the time column (a hypertable's unique keys must).
+  the time column (a hypertable's unique keys must). Rows it already holds
+  are moved into chunks by the migration, which holds the table locked for
+  as long as that takes.
 
 ## Why
 
@@ -140,14 +142,18 @@ pub struct Reading {
 | field | `id`, `time` | the tie-breaker and the time (required) |
 | field | `tenant`, `scope` | kept in every count; `scope` is what your views narrow readers by |
 | field | `level` | counted, and what the histogram is stacked by |
-| field | `facet` | counted by hour and by day; `per_top` also per day and `top`; `indexed` gets an index of its own |
+| field | `facet` | counted by hour and by day; `per_top` also per day and `top`; `indexed` (of a `facet` or a `filter`) gets an index of its own |
 | field | `top` | the entity counted on its own, per day: the grouped view's rows |
 | field | `filter` | a filter the counts do not keep: naming it reads the rows |
 | field | `search` | searched as text, every such column |
 | field | `sql = "…"` | the SQL type a filter's values are cast to, when the Rust type does not say (an enum) |
 
 A field with no `#[log(…)]` is still read by a page (it is a column of the
-row), and nothing else.
+row), and nothing else. The derive refuses what the migration could not
+make: `schema` and `view_schema` the same (a view over itself), a counted
+column named `bucket`, `events`, `first_at` or `last_at` (the counts' own),
+and a relation or index name past PostgreSQL's 63 bytes. A field named
+`r#type` is the column `type`.
 
 ## Setting up
 
@@ -167,7 +173,7 @@ fn govern(g: &Governed) -> String {
     let scope = g.scope.unwrap_or("zone");
     format!(
         "CREATE VIEW {vs}.{v} AS SELECT * FROM {s}.{r} \
-          WHERE {scope} = ANY(string_to_array(current_setting('app.zones'), ','));",
+          WHERE {scope} = ANY((SELECT string_to_array(current_setting('app.zones', true), ','))::text[]);",
         vs = g.view_schema,
         v = g.view,
         s = g.schema,
@@ -227,9 +233,14 @@ let groups: Vec<Group> = grouped(&Event::SPEC, &filter, "kind", 50)?
 | `grouped` | the counts per day and `top`, when the filter and the grouped field are kept there; the rows otherwise |
 
 A refused question — a window that ends before it begins, a field the table
-does not have, one named twice, a search of a table that searches nothing —
-is an [`Error`](https://docs.rs/magic_logs/latest/magic_logs/enum.Error.html),
-before any SQL is written: answer it as the caller's mistake.
+does not have, one named twice, a search of a table that searches nothing,
+a step that is not positive, a negative limit — is an
+[`Error`](https://docs.rs/magic_logs/latest/magic_logs/enum.Error.html),
+before any SQL is written: answer it as the caller's mistake. A value is
+sent as text and cast by the database to the column's type: one that does
+not read (`not-a-uuid` for a `uuid`) is refused there, SQLSTATE `22P02`,
+which is the caller's mistake too. A search is text as typed: `%` and `_`
+match themselves.
 
 With the `serde` feature, `Bucket`, `FacetCount` and `Group` serialize as
 `magic_logs_explorer` reads them: return them as they are.
