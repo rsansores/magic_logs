@@ -3,3 +3,6 @@ dist
 coverage
 node_modules
 pnpm-lock.yaml
+# Written by the crate's tests (UPDATE_CONTRACT=1).
+src/core/contract/rows.ts
+src/core/contract/fixtures

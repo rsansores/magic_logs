@@ -95,6 +95,7 @@ pub struct Cursor {
 /// at `bucket`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "BucketRow"))]
 pub struct Bucket {
     /// Where the bucket begins.
     pub bucket: DateTime<Utc>,
@@ -107,6 +108,7 @@ pub struct Bucket {
 /// How many rows hold `value` in `field`, under every other field's filter.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "FacetCountRow"))]
 pub struct FacetCount {
     /// The field counted.
     pub field: String,
@@ -120,6 +122,7 @@ pub struct FacetCount {
 /// and the last.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "GroupRow"))]
 pub struct Group {
     /// The `top`, as text.
     pub top: Option<String>,
@@ -438,6 +441,49 @@ mod json {
                 { "top": "u1", "value": "door", "count": 5,
                   "first_at": "2026-10-01T06:00:00Z", "last_at": null }
             ])
+        );
+    }
+
+    /// The explorer's types for the rows are these, generated: a field
+    /// renamed, added or typed otherwise here changes them there, and the
+    /// explorer's type-check reads its fixtures against them.
+    /// `UPDATE_CONTRACT=1` writes them.
+    #[test]
+    fn the_explorers_types_are_generated_from_these() {
+        use ts_rs::TS;
+        let cfg = ts_rs::Config::new().with_large_int("number");
+        let mut text = "// Generated from magic_logs' answer rows by its test \
+                        `the_explorers_types_are_generated_from_these`: UPDATE_CONTRACT=1 rewrites it.\n"
+            .to_owned();
+        for (docs, decl) in [
+            (Bucket::docs(), Bucket::decl(&cfg)),
+            (FacetCount::docs(), FacetCount::decl(&cfg)),
+            (Group::docs(), Group::decl(&cfg)),
+        ] {
+            text.push('\n');
+            // Rust's intra-doc links read as plain code in TypeScript.
+            text.push_str(
+                &docs
+                    .unwrap_or_default()
+                    .replace("[`", "`")
+                    .replace("`]", "`"),
+            );
+            text.push_str("export ");
+            text.push_str(&decl);
+            text.push('\n');
+        }
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../explorer/src/core/contract/rows.ts"
+        );
+        if std::env::var_os("UPDATE_CONTRACT").is_some() {
+            std::fs::write(path, &text).unwrap();
+        }
+        let written = std::fs::read_to_string(path).unwrap_or_default();
+        assert!(
+            written == text,
+            "explorer/src/core/contract/rows.ts is not what the crate serializes: \
+             UPDATE_CONTRACT=1 rewrites it"
         );
     }
 }

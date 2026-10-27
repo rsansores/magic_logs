@@ -1,32 +1,8 @@
-// The answers of magic_logs' four questions, as its rows serialize with the
-// `serde` feature (`Bucket`, `FacetCount`, `Group`), and the question every
-// one of them is asked.
+// The answers of magic_logs' questions, as its rows serialize with the
+// `serde` feature (generated, in rows.ts), and the question every one of
+// them is asked.
 
-/** One bar of the histogram, one level of it: `histogram`'s rows. */
-export interface BucketRow {
-  /** Where the bucket begins, an RFC 3339 instant. */
-  bucket: string
-  /** The level, as text; null for rows without one, or a table with no level. */
-  level: string | null
-  count: number
-}
-
-/** How many rows hold `value` in `field` under every other field's filter:
- * `facets`' rows. */
-export interface FacetCountRow {
-  field: string
-  value: string | null
-  count: number
-}
-
-/** One `top` and one value of the grouped field: `grouped`'s rows. */
-export interface GroupRow {
-  top: string | null
-  value: string | null
-  count: number
-  first_at: string | null
-  last_at: string | null
-}
+export type { BucketRow, FacetCountRow, GroupRow } from './rows.js'
 
 /** What every question shares: the window, each field's chosen values (any
  * of them; every field must match) and the search. A host turns it into its

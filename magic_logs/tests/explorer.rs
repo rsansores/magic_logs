@@ -279,3 +279,67 @@ fn a_filter_is_held_to_the_table() {
         Tier::DailyTop
     );
 }
+
+/// The JSON an explorer reads, from a database: what
+/// `explorer/src/core/contract/fixtures/answers.ts` holds. The explorer's
+/// type-check reads it against the generated types and its tests read it;
+/// a change on either side shows on the other. `UPDATE_CONTRACT=1` writes it.
+#[cfg(feature = "serde")]
+#[sqlx::test(migrations = false)]
+async fn the_json_an_explorer_reads_is_the_contract(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    let filter = window(1).with("kind", ["door", "power"]);
+    let buckets: Vec<Bucket> = histogram(&spec, &filter, Duration::hours(6))
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let mut counts: Vec<FacetCount> = facets(&spec, &filter, &["level", "kind", "unit_id"])
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    counts.sort_by(|a, b| (&a.field, &a.value).cmp(&(&b.field, &b.value)));
+    let groups: Vec<Group> = grouped(&spec, &filter, "kind", 4)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let json = serde_json::to_string_pretty(&serde_json::json!({
+        "question": {
+            "from": filter.from,
+            "to": filter.to,
+            "fields": { "kind": ["door", "power"] },
+        },
+        "step": "sixHours",
+        "histogram": buckets,
+        "facets": counts,
+        "grouped": groups,
+    }))
+    .unwrap();
+    let text = format!(
+        "// Written by magic_logs' `the_json_an_explorer_reads_is_the_contract`: \
+         UPDATE_CONTRACT=1 rewrites it.\n\
+         import type {{ BucketRow, FacetCountRow, GroupRow, Question }} from '../types.js'\n\n\
+         export default {json} satisfies {{\n  question: Question\n  step: string\n  \
+         histogram: BucketRow[]\n  facets: FacetCountRow[]\n  grouped: GroupRow[]\n}}\n"
+    );
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../explorer/src/core/contract/fixtures/answers.ts"
+    );
+    if std::env::var_os("UPDATE_CONTRACT").is_some() {
+        std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+        std::fs::write(path, &text).unwrap();
+    }
+    let written = std::fs::read_to_string(path).unwrap_or_default();
+    assert!(
+        written == text,
+        "explorer/src/core/contract/fixtures/answers.ts is not what the crate answers: \
+         UPDATE_CONTRACT=1 rewrites it"
+    );
+}
