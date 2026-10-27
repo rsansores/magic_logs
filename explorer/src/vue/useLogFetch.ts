@@ -74,6 +74,10 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   let inFlight = 0
   let again = false
   let waitingSince: number | null = null
+  // How many slides a wait lasts before it is given up: two, doubled each
+  // time one is given up, so a server slower than that is waited for longer
+  // until a whole round answers, and two again once one does.
+  let patience = 2
   let disposed = false
   // Which asking the pages answer: until its first page lands, the pages on
   // screen are the last question's, and no page may be read after them.
@@ -108,6 +112,8 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
       if (!signal.aborted) {
         inFlight--
         loading.value[which] = false
+        // A whole round answered: the next wait is a short one again.
+        if (inFlight === 0) patience = 2
       }
       if (inFlight === 0 && again && !disposed) {
         again = false
@@ -171,7 +177,8 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
         askedNow === askedBefore &&
         before !== undefined &&
         slide(before, question)
-      const waited = waitingSince !== null && Date.now() - waitingSince >= 2 * explorer.liveEvery
+      const waited = waitingSince !== null && Date.now() - waitingSince >= patience * explorer.liveEvery
+      if (waited) patience = Math.min(patience * 2, 64)
       if (slid && inFlight > 0 && !waited) {
         // The pages on screen answer the window before the slide: none is
         // read after them until the slid question's first page lands.

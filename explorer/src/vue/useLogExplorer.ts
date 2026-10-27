@@ -145,6 +145,8 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
       ticking = undefined
       if (on) {
         now.value = Date.now()
+        // No clock on a server render, which nothing tears down.
+        if (typeof window === 'undefined') return
         ticking = setInterval(() => {
           now.value = Date.now()
           slides.value++
@@ -190,7 +192,9 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     }
     normalize()
   }
-  watch([preset, from, to], normalize, { immediate: true, flush: 'sync' })
+  // Checked once the tick's writes have landed: a host writing `from`,
+  // `to` and `preset` one by one is judged on the window it wrote.
+  watch([preset, from, to], normalize, { immediate: true })
 
   const range = computed<Range>((before) => {
     const next = rangeOf(

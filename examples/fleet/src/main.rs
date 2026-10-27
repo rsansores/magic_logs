@@ -120,9 +120,16 @@ async fn set_up(pool: &PgPool) -> Result<(), Error> {
     if empty {
         println!("seeding thirty days of events…");
         sqlx::raw_sql(SEED).execute(pool).await?;
-        for tier in ["events_hourly", "events_daily", "events_daily_unit"] {
+        // Counted as far as each policy would count: a refresh past now
+        // would leave the rows driven in from here out of the counts until
+        // the policies caught up.
+        for (tier, lag) in [
+            ("events_hourly", "1 hour"),
+            ("events_daily", "1 day"),
+            ("events_daily_unit", "1 hour"),
+        ] {
             sqlx::query(&format!(
-                "CALL refresh_continuous_aggregate('fleet.{tier}', NULL, NULL)"
+                "CALL refresh_continuous_aggregate('fleet.{tier}', NULL, now() - interval '{lag}')"
             ))
             .execute(pool)
             .await?;
@@ -364,8 +371,9 @@ impl From<sqlx::Error> for Refused {
     /// A value the database could not read as its column's type — a cursor
     /// or a filter value that is not one — is the caller's mistake.
     fn from(e: sqlx::Error) -> Self {
-        match e.as_database_error().and_then(|d| d.code()).as_deref() {
-            Some("22P02" | "22007" | "22008" | "22023") => Self::Question(e.to_string()),
+        match e.as_database_error().and_then(|d| d.code()) {
+            // A data exception: a value that does not read as its column's.
+            Some(code) if code.starts_with("22") => Self::Question(e.to_string()),
             _ => Self::Database(e),
         }
     }

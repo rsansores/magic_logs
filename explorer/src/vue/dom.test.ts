@@ -404,7 +404,7 @@ describe('round four', () => {
     scope.stop()
   })
 
-  it('gives up waiting on an answer that never comes after two slides', async () => {
+  it('gives up waiting on an answer that never comes, after two slides, then four, then eight', async () => {
     const { value, scope } = scoped(() => {
       const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
       const c = counting(0)
@@ -412,9 +412,11 @@ describe('round four', () => {
       return { e, c, answers: useLogFetch(e, c.fetchers) }
     })
     value.e.live.value = true
+    // Asked at 0 s, then given up and asked again at 3 s, 8 s and 17 s.
     await vi.advanceTimersByTimeAsync(10_000)
-    expect(value.c.asked.histogram).toBeGreaterThanOrEqual(4)
-    expect(value.c.asked.page).toBeGreaterThanOrEqual(4)
+    expect(value.c.asked.histogram).toBe(3)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(value.c.asked.histogram).toBe(4)
     scope.stop()
   })
 
@@ -504,6 +506,69 @@ describe('round five', () => {
     value.h.handlers.onPointerup(event(30))
     expect(Date.parse(value.e.from.value)).toBe(now - 23 * HOUR)
     expect(Date.parse(value.e.to.value)).toBe(now - 21 * HOUR)
+    scope.stop()
+  })
+})
+
+describe('round six', () => {
+  it('slides a live window with the clock', async () => {
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], store: urlStore() }))
+    e.live.value = true
+    const before = e.question.value.to
+    vi.advanceTimersByTime(10_000)
+    await nextTick()
+    expect(Date.parse(e.question.value.to) - Date.parse(before)).toBe(10_000)
+    scope.stop()
+  })
+
+  it('takes a window a host writes piece by piece, in any order', async () => {
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [] }))
+    e.from.value = new Date(now - 3 * HOUR).toISOString()
+    e.to.value = new Date(now - 2 * HOUR).toISOString()
+    e.preset.value = 'custom'
+    await nextTick()
+    expect([e.preset.value, e.question.value.from]).toEqual([
+      'custom',
+      new Date(now - 3 * HOUR).toISOString(),
+    ])
+    e.preset.value = 'custom'
+    e.from.value = new Date(now - 5 * HOUR).toISOString()
+    e.to.value = new Date(now - 4 * HOUR).toISOString()
+    await nextTick()
+    expect([e.preset.value, e.question.value.to]).toEqual(['custom', new Date(now - 4 * HOUR).toISOString()])
+    scope.stop()
+  })
+
+  it('waits longer for a live server slower than two slides, until it answers', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(0)
+      c.fetchers.histogram = (_q, step, signal) =>
+        new Promise((resolve, reject) => {
+          const t = setTimeout(
+            () => resolve([{ bucket: new Date(now).toISOString(), level: step.name, count: 1 }]),
+            3_200,
+          )
+          signal.addEventListener('abort', () => (clearTimeout(t), reject(signal.reason)))
+        })
+      return { e, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(value.answers.buckets.value.length).toBeGreaterThan(0)
+    scope.stop()
+  })
+
+  it('zooms to the last bar no further than the window', () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: [] })
+      return { e, h: useHistogram(e, []) }
+    })
+    vi.setSystemTime(now + 30 * 60_000)
+    value.e.refresh()
+    const bars = value.h.geometry.value.bars
+    value.h.zoomTo(bars[bars.length - 1]!)
+    expect(value.e.to.value).toBe(new Date(now + 30 * 60_000).toISOString())
     scope.stop()
   })
 })

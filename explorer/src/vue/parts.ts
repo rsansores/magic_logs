@@ -67,8 +67,10 @@ export function useHistogram(
     const { from, to } = span(brush.value)
     const start = drawn.value.range.from.getTime()
     const width = drawn.value.range.to.getTime() - start
-    const x = Math.max((from.getTime() - start) / width, 0)
-    return { x, width: Math.min((to.getTime() - start) / width, 1) - x }
+    // On the plot drawn now, which an answer may have moved under the brush.
+    const clamp = (v: number) => Math.min(Math.max(v, 0), 1)
+    const x = clamp((from.getTime() - start) / width)
+    return { x, width: Math.max(clamp((to.getTime() - start) / width) - x, 0) }
   })
 
   return {
@@ -95,7 +97,9 @@ export function useHistogram(
       },
     },
     zoomTo(bar) {
-      toValue(explorer).zoom({ from: new Date(bar.at), to: new Date(bar.end) })
+      // The last bar is cut where the window ends: not into the future.
+      const end = Math.min(bar.end, drawn.value.range.to.getTime())
+      toValue(explorer).zoom({ from: new Date(bar.at), to: new Date(end) })
     },
   }
 }

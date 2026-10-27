@@ -43,8 +43,17 @@ one every hour up to a day ago. TimescaleDB keeps a log of which buckets
 changed since the last refresh, so a refresh with nothing new costs
 milliseconds (about 30 ms on the first host's 300 million rows), and one
 after a late row recounts only the buckets that row fell in, however old.
-What has not been refreshed yet is read from the rows
-(`materialized_only = false`): a count always includes the last hour.
+What lies past the counts' watermark — the end of the last refresh — is
+read from the rows (`materialized_only = false`): a count always includes
+the last hour.
+
+A refresh of your own (after a backfill, say) ends where the policy's
+would: `CALL refresh_continuous_aggregate('…_hourly', NULL, now() -
+interval '1 hour')`, the daily one at `now() - interval '1 day'`, hourly
+first. One that ends later (`NULL`, or in the future) moves the watermark
+past now: a row that arrives in a bucket already counted is not read from
+the rows, and waits for the policy to reach that bucket — up to two days
+for the daily counts.
 
 What a late row costs, measured: 1,000 rows sixty days late, into a new
 chunk, 30 ms; 1,000 rows into a compressed day twenty days back, 13 s, the
@@ -54,8 +63,8 @@ request, and a fleet of devices that reconnect after weeks keeps the job
 busy rather than the readers waiting. No window is cut off: a late row is
 counted by the next refresh of each count — within five minutes for the
 hourly and per-`top` counts, within the hour for the daily — and until then
-the counts of its bucket are short of the rows by it. A row newer than the
-last refresh is counted at once (real-time aggregation).
+the counts of its bucket are short of the rows by it. A row past the
+watermark is counted at once (real-time aggregation).
 
 ## Which question reads what
 

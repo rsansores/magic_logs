@@ -77,12 +77,12 @@ describe('useLogExplorer', () => {
     scope.stop()
   })
 
-  it('slides a live window with the clock', async () => {
+  it('runs no clock on a server render', async () => {
     const { e, scope } = explorer({ live: '1' })
     const before = e.question.value.to
-    vi.advanceTimersByTime(10_000)
+    vi.advanceTimersByTime(60_000)
     await nextTick()
-    expect(Date.parse(e.question.value.to) - Date.parse(before)).toBe(10_000)
+    expect(e.question.value.to).toBe(before)
     scope.stop()
   })
 })
