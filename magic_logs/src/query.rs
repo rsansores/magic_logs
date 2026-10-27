@@ -13,7 +13,9 @@ use crate::Error;
 /// named field may take (any of them; every field must match).
 #[derive(Debug, Clone)]
 pub struct Filter {
+    /// Where the window begins, inclusive.
     pub from: DateTime<Utc>,
+    /// Where it ends, exclusive.
     pub to: DateTime<Utc>,
     /// `(field, values)`: the row's value of `field` is one of `values`,
     /// written as SQL reads the field's type from text.
@@ -83,6 +85,7 @@ impl Filter {
 /// Where a page ends: the next one begins after this row.
 #[derive(Debug, Clone)]
 pub struct Cursor {
+    /// The row's time.
     pub time: DateTime<Utc>,
     /// The row's id, written as SQL reads the id's type from text.
     pub id: String,
@@ -93,8 +96,11 @@ pub struct Cursor {
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Bucket {
+    /// Where the bucket begins.
     pub bucket: DateTime<Utc>,
+    /// The level, as text; `None` for rows without one, or a table with no level.
     pub level: Option<String>,
+    /// How many rows.
     pub count: i64,
 }
 
@@ -102,8 +108,11 @@ pub struct Bucket {
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct FacetCount {
+    /// The field counted.
     pub field: String,
+    /// The value, as text; `None` for the rows that hold none.
     pub value: Option<String>,
+    /// How many rows hold it.
     pub count: i64,
 }
 
@@ -112,10 +121,15 @@ pub struct FacetCount {
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct Group {
+    /// The `top`, as text.
     pub top: Option<String>,
+    /// The grouped field's value, as text.
     pub value: Option<String>,
+    /// How many rows.
     pub count: i64,
+    /// The time of the group's first row.
     pub first_at: Option<DateTime<Utc>>,
+    /// The time of its last.
     pub last_at: Option<DateTime<Utc>>,
 }
 
@@ -219,7 +233,11 @@ fn push_where(
                 "{} ILIKE ",
                 wrap(format!("{}::text", ident(column)))
             ));
-            qb.push(wrap("'%' || ".to_owned()));
+            // The pattern passes through the function too: `f('%' || $n || '%')`.
+            if let Some(f) = spec.search_with {
+                qb.push(format!("{f}("));
+            }
+            qb.push("'%' || ");
             qb.push_bind(text.clone());
             qb.push(" || '%'");
             if spec.search_with.is_some() {

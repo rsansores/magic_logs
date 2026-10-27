@@ -1,0 +1,5 @@
+error: #[log(schema = "…")] is required
+ --> tests/derive/fail/missing_schema.rs:6:12
+  |
+6 | pub struct Event {
+  |            ^^^^^

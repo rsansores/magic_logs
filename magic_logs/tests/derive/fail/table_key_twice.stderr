@@ -1,0 +1,5 @@
+error: `name` is given twice
+ --> tests/derive/fail/table_key_twice.rs:5:41
+  |
+5 | #[log(name = "events", schema = "logs", name = "rows")]
+  |                                         ^^^^

@@ -1,0 +1,5 @@
+error: segment_by names a field marked #[log(…)]
+ --> tests/derive/fail/segment_by_unknown.rs:5:54
+  |
+5 | #[log(name = "events", schema = "logs", segment_by = "unit")]
+  |                                                      ^^^^^^

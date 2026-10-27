@@ -24,6 +24,7 @@ struct Table {
     compress_after: Option<LitStr>,
     segment_by: Option<LitStr>,
     search_with: Option<LitStr>,
+    krate: Option<LitStr>,
 }
 
 #[derive(Default)]
@@ -67,10 +68,11 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 "compress_after" => &mut table.compress_after,
                 "segment_by" => &mut table.segment_by,
                 "search_with" => &mut table.search_with,
+                "crate" => &mut table.krate,
                 _ => {
                     return Err(meta.error(
                         "expected `name`, `schema`, `view_schema`, `chunk`, `compress_after`, \
-                         `segment_by` or `search_with`",
+                         `segment_by`, `search_with` or `crate`",
                     ))
                 }
             };
@@ -85,6 +87,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         lit.as_ref().map(LitStr::value).ok_or_else(|| {
             syn::Error::new_spanned(ident, format!("#[log({what} = \"…\")] is required"))
         })
+    };
+    let krate: syn::Path = match &table.krate {
+        Some(lit) => lit.parse().map_err(|_| {
+            syn::Error::new_spanned(lit, "`crate` is a path to magic_logs: \"crate::logs\"")
+        })?,
+        None => syn::parse_quote!(::magic_logs),
     };
     let name = required(&table.name, "name")?;
     let schema = required(&table.schema, "schema")?;
@@ -101,6 +109,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         .as_ref()
         .map_or("2 days".to_owned(), LitStr::value);
 
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &input.generics,
+            "a log table has no generic parameters",
+        ));
+    }
     let Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(ident, "a log table is a struct"));
     };
@@ -211,7 +225,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     let column = |c: &Col| {
         let (n, s) = (&c.name, &c.sql);
-        quote!(::magic_logs::Column { name: #n, sql: #s })
+        quote!(#krate::Column { name: #n, sql: #s })
     };
     let option = |c: Option<&Col>| match c {
         Some(c) => {
@@ -235,7 +249,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             let counted = c.flags.facet || c.flags.level || c.flags.scope;
             let per_top = c.flags.per_top || c.flags.level || c.flags.scope;
             let indexed = c.flags.indexed;
-            quote!(::magic_logs::Field { column: #col, counted: #counted, per_top: #per_top, indexed: #indexed })
+            quote!(#krate::Field { column: #col, counted: #counted, per_top: #per_top, indexed: #indexed })
         });
     let search = cols
         .iter()
@@ -255,8 +269,8 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let (segment_by, search_with) = (opt_lit(&table.segment_by), opt_lit(&table.search_with));
 
     Ok(quote! {
-        impl ::magic_logs::MagicLog for #ident {
-            const SPEC: ::magic_logs::Spec = ::magic_logs::Spec {
+        impl #krate::MagicLog for #ident {
+            const SPEC: #krate::Spec = #krate::Spec {
                 name: #name,
                 schema: #schema,
                 view_schema: #view_schema,
@@ -269,7 +283,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 fields: &[#(#fields),*],
                 search: &[#(#search),*],
                 search_with: #search_with,
-                storage: ::magic_logs::Storage {
+                storage: #krate::Storage {
                     chunk: #chunk,
                     compress_after: #compress_after,
                     segment_by: #segment_by,

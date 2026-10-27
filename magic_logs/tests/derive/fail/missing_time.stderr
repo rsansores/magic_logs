@@ -1,0 +1,5 @@
+error: one field is #[log(time)]
+ --> tests/derive/fail/missing_time.rs:6:12
+  |
+6 | pub struct Event {
+  |            ^^^^^

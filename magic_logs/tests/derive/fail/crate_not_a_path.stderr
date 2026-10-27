@@ -1,0 +1,5 @@
+error: `crate` is a path to magic_logs: "crate::logs"
+ --> tests/derive/fail/crate_not_a_path.rs:5:49
+  |
+5 | #[log(name = "events", schema = "logs", crate = "not a path")]
+  |                                                 ^^^^^^^^^^^^

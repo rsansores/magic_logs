@@ -36,13 +36,16 @@ pub struct Spec {
 /// A column and its SQL type, which a filter's values are cast to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Column {
+    /// The column's name, as the struct's field names it.
     pub name: &'static str,
+    /// Its SQL type: what a filter's values, sent as text, are cast to.
     pub sql: &'static str,
 }
 
 /// A column a filter may name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Field {
+    /// The column.
     pub column: Column,
     /// Counted by hour and by day: filtering on it keeps the counts usable.
     pub counted: bool,
@@ -136,5 +139,6 @@ impl Spec {
 
 /// A row type that is a log table: what `#[derive(MagicLog)]` implements.
 pub trait MagicLog {
+    /// The table, as the derive read it.
     const SPEC: Spec;
 }

@@ -1,0 +1,5 @@
+error: only one field is #[log(level)]
+  --> tests/derive/fail/two_levels.rs:14:9
+   |
+14 |     pub priority: String,
+   |         ^^^^^^^^

@@ -10,6 +10,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 readme = "../README.md"
+documentation = "https://docs.rs/magic_logs"
 
 [lib]
 proc-macro = true

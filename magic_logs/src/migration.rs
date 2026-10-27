@@ -22,10 +22,15 @@ fn literal(text: &str) -> String {
 /// `relation` in `schema`, narrowed by `scope` when there is one.
 #[derive(Debug, Clone, Copy)]
 pub struct Governed<'a> {
+    /// The schema the view is made in: [`Spec::view_schema`](crate::Spec::view_schema).
     pub view_schema: &'a str,
+    /// The view's name: the relation's own.
     pub view: &'a str,
+    /// The schema the relation lives in: [`Spec::schema`](crate::Spec::schema).
     pub schema: &'a str,
+    /// The table, or one of its counts.
     pub relation: &'a str,
+    /// The column a reader is narrowed by, kept in every relation.
     pub scope: Option<&'a str>,
 }
 

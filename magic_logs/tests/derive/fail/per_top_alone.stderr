@@ -1,0 +1,5 @@
+error: `per_top` qualifies a `facet`
+  --> tests/derive/fail/per_top_alone.rs:12:9
+   |
+12 |     pub kind: String,
+   |         ^^^^

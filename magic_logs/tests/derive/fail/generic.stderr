@@ -1,0 +1,5 @@
+error: a log table has no generic parameters
+ --> tests/derive/fail/generic.rs:6:17
+  |
+6 | pub struct Event<T> {
+  |                 ^^^

@@ -1,0 +1,5 @@
+error: no SQL type is known for this type: say it with #[log(sql = "…")]
+  --> tests/derive/fail/unknown_sql_type.rs:12:16
+   |
+12 |     pub level: Level,
+   |                ^^^^^

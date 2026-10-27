@@ -1,0 +1,5 @@
+error: expected `time`, `id`, `tenant`, `scope`, `level`, `top`, `facet`, `per_top`, `filter`, `indexed`, `search` or `sql = "…"`
+  --> tests/derive/fail/unknown_field_key.rs:11:11
+   |
+11 |     #[log(facets)]
+   |           ^^^^^^

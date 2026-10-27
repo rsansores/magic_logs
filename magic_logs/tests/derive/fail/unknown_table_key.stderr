@@ -1,0 +1,5 @@
+error: expected `name`, `schema`, `view_schema`, `chunk`, `compress_after`, `segment_by`, `search_with` or `crate`
+ --> tests/derive/fail/unknown_table_key.rs:5:41
+  |
+5 | #[log(name = "events", schema = "logs", chunks = "1 day")]
+  |                                         ^^^^^^

@@ -1,0 +1,5 @@
+error: a log table is a struct
+ --> tests/derive/fail/an_enum.rs:6:10
+  |
+6 | pub enum Event {
+  |          ^^^^^

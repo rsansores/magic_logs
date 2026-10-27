@@ -17,7 +17,8 @@ use uuid::Uuid;
     schema = "private",
     chunk = "1 day",
     compress_after = "2 days",
-    segment_by = "unit_id"
+    segment_by = "unit_id",
+    search_with = "lower"
 )]
 struct Event {
     #[log(id)]

@@ -10,12 +10,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 readme = "../README.md"
+documentation = "https://docs.rs/magic_logs"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 magic_logs_derive = { version = "=0.1.0", path = "../magic_logs_derive" }
 serde = { version = "1", features = ["derive"], optional = true }
-sqlx = { version = "0.8", default-features = false, features = ["postgres", "chrono", "uuid"] }
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "chrono", "derive", "uuid"] }
 thiserror = "2"
 uuid = "1"
 
@@ -27,3 +28,7 @@ serde = ["dep:serde", "chrono/serde"]
 serde_json = "1"
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "macros", "migrate", "chrono", "uuid", "derive"] }
 tokio = { version = "1", features = ["macros", "rt"] }
+trybuild = "1"
+
+[package.metadata.docs.rs]
+all-features = true

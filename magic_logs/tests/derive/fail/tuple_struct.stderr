@@ -1,0 +1,5 @@
+error: a log table's fields are named
+ --> tests/derive/fail/tuple_struct.rs:6:12
+  |
+6 | pub struct Event(i64, DateTime<Utc>);
+  |            ^^^^^

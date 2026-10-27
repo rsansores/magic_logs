@@ -1,0 +1,5 @@
+error: one field is #[log(id)]
+ --> tests/derive/fail/missing_id.rs:6:12
+  |
+6 | pub struct Event {
+  |            ^^^^^
