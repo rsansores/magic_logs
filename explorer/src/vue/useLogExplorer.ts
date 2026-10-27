@@ -9,6 +9,7 @@ import { flag, instant, listOf, text, type Codec } from '../core/codec.js'
 import type { Question } from '../core/contract/types.js'
 import { narrowed as narrows } from '../core/facets.js'
 import {
+  LONGEST,
   defaultPresets,
   presetOf,
   rangeOf,
@@ -132,13 +133,25 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
 
   // Each of these changes only when its value does: a write to the store
   // that leaves the question as it was asks nothing again.
+  // A custom window the store holds that does not read — no instants,
+  // backwards, too long — is the window shown first, said so.
+  const longest = options.longest ?? LONGEST
+  if (preset.value === 'custom') {
+    const span = Date.parse(to.value) - Date.parse(from.value)
+    if (!(span > 0 && span <= longest)) {
+      preset.value = initial
+      from.value = ''
+      to.value = ''
+    }
+  }
+
   const range = computed<Range>((before) => {
     const next = rangeOf(
       { preset: preset.value, from: from.value, to: to.value },
       now.value,
       presets,
       initial,
-      options.longest,
+      longest,
     )
     return before && sameRange(before, next) ? before : next
   })
@@ -186,7 +199,9 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
       cursors.value = [...cursors.value, next]
     },
     zoom(next) {
-      from.value = next.from.toISOString()
+      // A brush widened past the longest window keeps its end.
+      const start = Math.max(next.from.getTime(), next.to.getTime() - longest)
+      from.value = new Date(start).toISOString()
       to.value = next.to.toISOString()
       preset.value = 'custom'
       live.value = false
@@ -212,6 +227,7 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     },
     refresh() {
       now.value = Date.now()
+      cursors.value = [undefined]
       asked.value++
     },
   }

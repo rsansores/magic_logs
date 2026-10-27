@@ -20,8 +20,8 @@ pub struct Filter {
     /// `(field, values)`: the row's value of `field` is one of `values`,
     /// written as SQL reads the field's type from text — the database casts
     /// them, and refuses one that does not read (`22P02`). An empty list
-    /// leaves the field unfiltered; no list selects the rows without a value
-    /// (`NULL`), which a facet counts as `None`.
+    /// leaves the field unfiltered. The rows without a value (`NULL`), which
+    /// a facet counts as `None`, are not selectable.
     pub fields: Vec<(String, Vec<String>)>,
     /// Text the searched columns contain, as typed: `%`, `_` and `\\` are
     /// themselves, not patterns.
@@ -157,7 +157,8 @@ pub fn counts_tier(spec: &Spec, filter: &Filter, step: Option<Duration>) -> Tier
 /// [`counts_tier`], of a tier that also keeps the column `also` (a facet's).
 fn tier_keeping(spec: &Spec, filter: &Filter, step: Option<Duration>, also: Option<&str>) -> Tier {
     let whole = |unit: Duration| {
-        step.is_none_or(|s| s >= unit && s.num_seconds() % unit.num_seconds() == 0)
+        let micros = |d: Duration| d.num_microseconds().unwrap_or(i64::MAX);
+        step.is_none_or(|s| s >= unit && micros(s) % micros(unit) == 0)
     };
     if filter.search.is_some() || !whole(Duration::hours(1)) {
         return Tier::Raw;
@@ -196,10 +197,13 @@ fn keeps(spec: &Spec, tier: Tier, name: &str) -> bool {
     }
 }
 
-/// The counts per `top` that answer `filter`, or the rows.
+/// The counts per day and `top` that answer `filter` — a window longer than
+/// three days whose every field they keep — or the rows.
 pub fn per_top_tier(spec: &Spec, filter: &Filter) -> Tier {
     let kept = filter.named().all(|name| keeps(spec, Tier::DailyTop, name));
-    if spec.top.is_none() || !kept || filter.search.is_some() {
+    // Whole days answer a window of days; a shorter one, its rows.
+    let long = filter.to - filter.from > Duration::days(DAILY_FROM);
+    if spec.top.is_none() || !kept || !long || filter.search.is_some() {
         Tier::Raw
     } else {
         Tier::DailyTop
@@ -266,16 +270,15 @@ fn push_where(
                 "{} ILIKE ",
                 wrap(format!("{}::text", ident(column)))
             ));
-            // The pattern passes through the function too: `f('%' || $n || '%')`.
-            if let Some(f) = spec.search_with {
-                qb.push(format!("{f}("));
-            }
-            qb.push("'%' || ");
-            qb.push_bind(like_escaped(text));
-            qb.push(" || '%'");
-            if spec.search_with.is_some() {
-                qb.push(")");
-            }
+            // The text passes through the function first, then is escaped:
+            // the function may make a `%` of what it was given (unaccent
+            // folds `％` into one).
+            qb.push(format!(
+                "'%' || replace(replace(replace({}(",
+                spec.search_with.unwrap_or("")
+            ));
+            qb.push_bind(text.clone());
+            qb.push(r"), '\', '\\'), '%', '\%'), '_', '\_') || '%'");
         }
         qb.push(")");
     }
@@ -430,18 +433,6 @@ pub fn grouped(
     qb.push(" GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT ");
     qb.push_bind(limit);
     Ok(qb)
-}
-
-/// `text` as LIKE reads it literally: its `\\`, `%` and `_` escaped.
-fn like_escaped(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        if matches!(c, '\\' | '%' | '_') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
 }
 
 fn literal(text: &str) -> String {

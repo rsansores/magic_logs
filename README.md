@@ -229,8 +229,8 @@ let groups: Vec<Group> = grouped(&Event::SPEC, &filter, "kind", 50)?
 |---|---|
 | `page` | the rows, from `(time DESC, id DESC)`, or a field's own index |
 | `histogram` | the daily counts for a step of whole days, the hourly ones for whole hours, when the filter names only counted fields; the rows otherwise |
-| `facets` | the daily counts past three days, the hourly ones within; a `top` from the counts per day and `top`; the rows for what the counts do not keep |
-| `grouped` | the counts per day and `top`, when the filter and the grouped field are kept there; the rows otherwise |
+| `facets` | the daily counts past three days, the hourly ones within; a `top` from the counts per day and `top` past three days; the rows for what the counts do not keep |
+| `grouped` | the counts per day and `top` past three days, when the filter and the grouped field are kept there; the rows otherwise |
 
 A refused question — a window that ends before it begins, a field the table
 does not have, one named twice, a search of a table that searches nothing,

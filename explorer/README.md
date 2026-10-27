@@ -114,9 +114,14 @@ How it behaves:
   read.
 - **Live slides a named window** every `liveEvery` ms (10 s). A slide while
   answers are on their way waits for them and asks once after, so a server
-  slower than the slide still answers. Reading back (`more`) and zooming
-  stop live: the window holds still while a reader reads it.
-- **A page that fails can be asked for again**: its cursor is given back.
+  slower than the slide still answers; anything the reader changes is asked
+  at once, and the answers on their way are dropped. Reading back (`more`)
+  and zooming stop live: the window holds still while a reader reads it.
+- **Pages follow their question.** Until a new question's first page
+  arrives, the last question's rows stay on screen and `next` is null, so
+  no page is read after them; `refresh()` starts the pages again too. A page
+  that fails can be asked for again: its cursor is given back, and its
+  error is cleared once it is answered.
 - **The address is read defensively.** A preset is one of yours (not
   `toString`), an instant is RFC 3339 with its offset, a custom window
   spans at most `longest` (about two years), a field's values pass its
@@ -125,6 +130,10 @@ How it behaves:
 - **Steps**: minutes for a window of up to two hours, five minutes up to
   eight hours, hours up to four days, six hours up to twenty, days past that
   — where magic_logs answers from its daily counts.
+- **In the browser.** `urlStore()` reads the address and `useLogFetch`
+  asks as soon as it is called: on a server render, call them on the
+  client (`onMounted`, or a client-only component), or the markup the
+  server sends and the client's will differ.
 - **Time is UTC.** Buckets begin where TimescaleDB's `time_bucket` begins
   them, on UTC boundaries, and so do the round instants `geometry` ticks
   at: format the axis in UTC, or a day's label falls on the day before west

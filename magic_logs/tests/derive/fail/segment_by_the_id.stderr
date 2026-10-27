@@ -1,0 +1,5 @@
+error: the time and the id order a compressed chunk: segment_by names another column
+ --> tests/derive/fail/segment_by_the_id.rs:5:54
+  |
+5 | #[log(name = "events", schema = "logs", segment_by = "id")]
+  |                                                      ^^^^

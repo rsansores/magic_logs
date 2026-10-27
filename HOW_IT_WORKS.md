@@ -68,9 +68,12 @@ field it names:
   search, or a field the counts do not keep (a `filter`) reads the rows;
 - a **facet** reads the daily counts for a window longer than three days,
   the hourly ones for a shorter one; the `top`'s facet reads the counts per
-  day and `top`;
-- **grouped** reads the counts per day and `top` when every field the
-  filter names, and the grouped one, are kept there;
+  day and `top` for a window longer than three days, the rows for a
+  shorter one (the hourly counts do not keep the `top`);
+- **grouped** reads the counts per day and `top` for a window longer than
+  three days when every field the filter names, and the grouped one, are
+  kept there; the rows otherwise — a group's first and last row are then
+  the window's own;
 - a **page** always reads the rows.
 
 A question that names the `top` (one unit) and asks by whole days reads

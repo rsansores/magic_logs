@@ -1,0 +1,13 @@
+error: the time is a timestamp: `bigint` is not one (a `DateTime<Utc>`, or `sql = "timestamptz"`)
+  --> tests/derive/fail/time_not_a_timestamp.rs:10:9
+   |
+10 |     pub at: i64,
+   |         ^^
+
+warning: unused imports: `DateTime` and `Utc`
+ --> tests/derive/fail/time_not_a_timestamp.rs:1:14
+  |
+1 | use chrono::{DateTime, Utc};
+  |              ^^^^^^^^  ^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

@@ -17,7 +17,7 @@ use uuid::Uuid;
     chunk = "1 day",
     compress_after = "2 days",
     segment_by = "unit_id",
-    search_with = "lower"
+    search_with = "fold"
 )]
 struct Event {
     #[log(id)]
@@ -96,6 +96,8 @@ async fn refresh(pool: &PgPool) {
 async fn setup_with(pool: &PgPool, govern: fn(&Governed) -> String) {
     sqlx::raw_sql(
         "CREATE EXTENSION IF NOT EXISTS timescaledb; \
+         CREATE FUNCTION fold(t text) RETURNS text IMMUTABLE LANGUAGE sql \
+             AS $$ SELECT translate(lower(t), '％＿＼', '%_\\') $$; \
          CREATE TYPE level AS ENUM ('Info', 'Warning', 'Error'); \
          CREATE SCHEMA private; \
          CREATE TABLE private.events (id uuid NOT NULL, at timestamptz NOT NULL, tenant_id uuid NOT NULL, \
@@ -170,6 +172,8 @@ async fn the_counts_answer_what_the_rows_answer(pool: PgPool) {
 
     // Facets, each under the other filters but its own.
     let filter = window(4).with("kind", ["door"]).with("level", ["Error"]);
+    assert_eq!(magic_logs::counts_tier(&spec, &filter, None), Tier::Daily);
+    assert_eq!(magic_logs::per_top_tier(&spec, &filter), Tier::DailyTop);
     let mut counted: Vec<FacetCount> =
         facets(&spec, &filter, &["kind", "level", "zone_id", "unit_id"])
             .unwrap()
@@ -301,6 +305,13 @@ fn a_filter_is_held_to_the_table() {
     assert_eq!(tier(&window(1), Some(Duration::minutes(5))), Tier::Raw);
     assert_eq!(tier(&window(1), Some(Duration::minutes(90))), Tier::Raw);
     assert_eq!(tier(&window(1), Some(Duration::hours(1))), Tier::Hourly);
+    assert_eq!(
+        tier(
+            &window(1),
+            Some(Duration::hours(1) + Duration::milliseconds(1))
+        ),
+        Tier::Raw
+    );
     assert_eq!(tier(&window(7), Some(Duration::hours(6))), Tier::Hourly);
     assert_eq!(tier(&window(7), Some(Duration::days(1))), Tier::Daily);
     assert_eq!(tier(&window(2), None), Tier::Hourly);
@@ -605,6 +616,9 @@ async fn a_search_reads_its_text_as_typed(pool: PgPool) {
         }
     };
     assert_eq!(found("50%").await, 10);
+    // The function folds `％` into `%` before the text is escaped.
+    assert_eq!(found("50％").await, 10);
+    assert_eq!(found("cpu＿at").await, 0);
     assert_eq!(found("now\\").await, 10);
     assert_eq!(found("cpu_at").await, 0);
 }
@@ -640,4 +654,25 @@ async fn a_table_of_only_a_time_and_an_id_is_made_a_log_table(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(bars.iter().map(|b| b.count).sum::<i64>(), 300);
+}
+
+#[sqlx::test(migrations = false)]
+async fn a_short_window_counts_its_tops_from_the_rows(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    let begins = day() + Duration::hours(10);
+    let filter = Filter::new(begins, begins + Duration::minutes(30));
+    assert_eq!(magic_logs::per_top_tier(&spec, &filter), Tier::Raw);
+    let (counted, raw) = both_facets(&pool, &filter, &["unit_id"]).await;
+    assert_eq!(counted, raw);
+    assert_eq!(counted.iter().map(|f| f.count).sum::<i64>(), 3 * 3);
+    let groups: Vec<Group> = grouped(&spec, &filter, "kind", 50)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert!(groups
+        .iter()
+        .all(|g| g.first_at.unwrap() >= filter.from && g.last_at.unwrap() < filter.to));
 }

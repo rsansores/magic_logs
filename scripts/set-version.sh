@@ -29,12 +29,15 @@ for manifest in Cargo.toml examples/fleet/Cargo.toml; do
   cargo update --workspace --manifest-path "$manifest"
 done
 
-# The entry being released: one already dated for this version, or the
-# unreleased one, which this dates.
-if ! grep -q "^## $version — [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$" CHANGELOG.md; then
-  grep -q -i "^## .*unreleased$" CHANGELOG.md \
-    || { echo "CHANGELOG.md has no unreleased entry to release" >&2; exit 1; }
-  sed -i "0,/^## .*[Uu]nreleased$/s//## $version — $date/" CHANGELOG.md
+# The entry being released: one already dated for this version, or an
+# unreleased one — `## Unreleased`, or `## <this version> — unreleased`,
+# never another version's — which this dates.
+escaped=${version//./\\.}
+entry="^## \(Unreleased\|$escaped — unreleased\)$"
+if ! grep -q "^## $escaped — [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$" CHANGELOG.md; then
+  grep -q "$entry" CHANGELOG.md \
+    || { echo "CHANGELOG.md has no \"## Unreleased\" or \"## $version — unreleased\" entry" >&2; exit 1; }
+  sed -i "0,/$entry/s//## $version — $date/" CHANGELOG.md
 fi
 
 scripts/check-versions.sh "$version"

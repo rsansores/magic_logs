@@ -10,6 +10,14 @@ use syn::{ext::IdentExt, parse_macro_input, Data, DeriveInput, Fields, LitStr, T
 /// may be named.
 const COUNTS_OWN: [&str; 4] = ["bucket", "events", "first_at", "last_at"];
 
+/// The SQL types a hypertable's time may have, as `sql` names them.
+const TIMES: [&str; 4] = [
+    "timestamptz",
+    "timestamp with time zone",
+    "timestamp",
+    "timestamp without time zone",
+];
+
 /// The longest identifier PostgreSQL keeps whole.
 const LONGEST: usize = 63;
 
@@ -215,7 +223,10 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             .as_ref()
             .map(|i| i.unraw().to_string())
             .unwrap_or_default();
-        let counted = flags.tenant || flags.scope || flags.level || flags.facet || flags.top;
+        // The time is bucketed into `bucket` in every count, and the counted
+        // columns are kept beside it.
+        let counted =
+            flags.time || flags.tenant || flags.scope || flags.level || flags.facet || flags.top;
         if counted && COUNTS_OWN.contains(&name.as_str()) {
             return Err(syn::Error::new(
                 at,
@@ -247,6 +258,15 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     };
     let time = one(|f| f.time, "time", true)?.expect("required");
     let id = one(|f| f.id, "id", true)?.expect("required");
+    if !TIMES.contains(&time.sql.as_str()) {
+        return Err(syn::Error::new(
+            time.at,
+            format!(
+                "the time is a timestamp: `{}` is not one (a `DateTime<Utc>`, or `sql = \"timestamptz\"`)",
+                time.sql
+            ),
+        ));
+    }
     let tenant = one(|f| f.tenant, "tenant", false)?;
     let scope = one(|f| f.scope, "scope", false)?;
     let level = one(|f| f.level, "level", false)?;
@@ -256,6 +276,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             return Err(syn::Error::new_spanned(
                 segment,
                 "segment_by names a field marked #[log(…)]",
+            ));
+        }
+        if segment.value() == time.name || segment.value() == id.name {
+            return Err(syn::Error::new_spanned(
+                segment,
+                "the time and the id order a compressed chunk: segment_by names another column",
             ));
         }
     }

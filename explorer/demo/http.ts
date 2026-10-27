@@ -14,7 +14,9 @@ function query(q: Question, extra: Record<string, string | undefined> = {}) {
 }
 
 async function get<T>(path: string, params: URLSearchParams, signal: AbortSignal): Promise<T> {
-  const answer = await fetch(`${path}?${params}`, { signal })
+  // The fleet reads the zones a reader may see from this header: `*` is
+  // every zone. A real host takes them from the reader's session instead.
+  const answer = await fetch(`${path}?${params}`, { signal, headers: { 'x-zones': '*' } })
   if (!answer.ok) throw new Error(`${answer.status} ${await answer.text()}`)
   return (await answer.json()) as T
 }

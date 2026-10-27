@@ -2,7 +2,7 @@
 SELECT * FROM "api"."events" WHERE "at" >= $1 AND "at" < $2 ORDER BY "at" DESC, "id" DESC LIMIT $3;
 
 -- page after a cursor, narrowed and searched
-SELECT * FROM "api"."events" WHERE "at" >= $1 AND "at" < $2 AND "kind" = ANY($3::text[]) AND (f_unaccent("description"::text) ILIKE f_unaccent('%' || $4 || '%')) AND "at" <= $5 AND ("at", "id") < ($6, $7::uuid) ORDER BY "at" DESC, "id" DESC LIMIT $8;
+SELECT * FROM "api"."events" WHERE "at" >= $1 AND "at" < $2 AND "kind" = ANY($3::text[]) AND (f_unaccent("description"::text) ILIKE '%' || replace(replace(replace(f_unaccent($4), '\', '\\'), '%', '\%'), '_', '\_') || '%') AND "at" <= $5 AND ("at", "id") < ($6, $7::uuid) ORDER BY "at" DESC, "id" DESC LIMIT $8;
 
 -- histogram by day: the daily counts
 SELECT time_bucket($1, bucket) AS bucket, "severity"::text AS level, sum(events)::bigint AS count FROM "api"."events_daily" WHERE bucket >= time_bucket(INTERVAL '1 day', $2) AND bucket < $3 GROUP BY 1, 2 ORDER BY 1, 2;
@@ -29,4 +29,4 @@ SELECT time_bucket($1, "at") AS bucket, "severity"::text AS level, count(*) AS c
 SELECT "unit_id"::text AS top, "kind"::text AS value, sum(events)::bigint AS count, min(first_at) AS first_at, max(last_at) AS last_at FROM "api"."events_daily_unit" WHERE bucket >= time_bucket(INTERVAL '1 day', $1) AND bucket < $2 GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT $3;
 
 -- grouped, searched: the rows
-SELECT "unit_id"::text AS top, "kind"::text AS value, count(*) AS count, min("at") AS first_at, max("at") AS last_at FROM "api"."events" WHERE "at" >= $1 AND "at" < $2 AND (f_unaccent("description"::text) ILIKE f_unaccent('%' || $3 || '%')) GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT $4;
+SELECT "unit_id"::text AS top, "kind"::text AS value, count(*) AS count, min("at") AS first_at, max("at") AS last_at FROM "api"."events" WHERE "at" >= $1 AND "at" < $2 AND (f_unaccent("description"::text) ILIKE '%' || replace(replace(replace(f_unaccent($3), '\', '\\'), '%', '\%'), '_', '\_') || '%') GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT $4;

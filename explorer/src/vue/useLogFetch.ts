@@ -50,7 +50,7 @@ export interface LogAnswers<Row> {
   groups: Readonly<Ref<GroupRow[]>>
   /** Which questions wait for an answer. */
   loading: Readonly<Ref<Record<Which, boolean>>>
-  /** The last failure of the question asked now, when one failed. */
+  /** A failure of the question asked now, until that part is answered. */
   error: Readonly<Ref<unknown>>
 }
 
@@ -61,11 +61,22 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   const pages = shallowRef<Page<Row>[]>([])
   const groups = shallowRef<GroupRow[]>([])
   const loading = ref<Record<Which, boolean>>({ histogram: false, facets: false, rows: false, groups: false })
-  const error = shallowRef<unknown>(null)
+  const errors = shallowRef<Record<Which, unknown>>({
+    histogram: null,
+    facets: null,
+    rows: null,
+    groups: null,
+  })
 
   let asked = new AbortController()
   let inFlight = 0
   let again = false
+  let disposed = false
+  // Which asking the pages answer: until its first page lands, the pages on
+  // screen are the last question's, and no page may be read after them.
+  let asking = 0
+  const pagesOf = ref(0)
+  const current = ref(0)
 
   async function ask<T>(
     which: Which,
@@ -79,16 +90,19 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
     inFlight++
     try {
       const answer = await fetch(signal)
-      if (!signal.aborted) keep(answer)
+      if (!signal.aborted) {
+        keep(answer)
+        errors.value = { ...errors.value, [which]: null }
+      }
     } catch (e) {
       if (!signal.aborted) {
-        error.value = e
+        errors.value = { ...errors.value, [which]: e }
         failed?.()
       }
     } finally {
       inFlight--
       if (!signal.aborted) loading.value[which] = false
-      if (inFlight === 0 && again) {
+      if (inFlight === 0 && again && !disposed) {
         again = false
         askAll()
       }
@@ -96,12 +110,15 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   }
 
   function askAll() {
+    if (disposed) return
     asked.abort()
     asked = new AbortController()
-    error.value = null
+    errors.value = { histogram: null, facets: null, rows: null, groups: null }
     loading.value = { histogram: false, facets: false, rows: false, groups: false }
     const question = explorer.question.value
     const answered = { range: explorer.range.value, step: explorer.step.value }
+    const these = ++asking
+    current.value = these
     void ask(
       'histogram',
       fetchers.histogram && ((s) => fetchers.histogram!(question, answered.step, s)),
@@ -119,6 +136,7 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
     )
     void ask('rows', fetchers.page && ((s) => fetchers.page!(question, undefined, s)), (page) => {
       pages.value = [page]
+      pagesOf.value = these
     })
     void ask('groups', fetchers.grouped && ((s) => fetchers.grouped!(question, s)), (rows) => {
       groups.value = rows
@@ -127,44 +145,71 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
 
   watch(
     [explorer.question, explorer.asked],
-    () => {
-      // A live window slid while answers are on their way: they land, and
-      // the newest question is asked after them.
-      if (explorer.live.value && inFlight > 0) again = true
+    ([question, askedNow], [before, askedBefore]) => {
+      // The clock slid a live window while answers are on their way: they
+      // land, and the newest question is asked after them. Anything the
+      // reader changed is asked at once.
+      const slid =
+        explorer.live.value && askedNow === askedBefore && before !== undefined && slide(before, question)
+      if (slid && inFlight > 0) again = true
       else askAll()
     },
     { immediate: true },
   )
 
-  // A cursor added after the first: the page it begins, appended. A page
-  // that fails gives its cursor back, so asking for it again asks again.
+  // A cursor added after the first: the page it begins, appended — when it
+  // follows the last page read for the question asked now. A page that
+  // fails gives its cursor back, so asking for it again asks again.
   watch(explorer.cursors, (cursors, before) => {
     const cursor = cursors[cursors.length - 1]
     if (cursors.length <= 1 || cursors.length <= (before?.length ?? 0)) return
+    const giveBack = () => {
+      if (explorer.cursors.value[explorer.cursors.value.length - 1] === cursor)
+        explorer.cursors.value = explorer.cursors.value.slice(0, -1)
+    }
+    const these = current.value
+    if (pagesOf.value !== these || pages.value[pages.value.length - 1]?.next !== cursor) return giveBack()
     const question = explorer.question.value
     void ask(
       'rows',
       fetchers.page && ((s) => fetchers.page!(question, cursor, s)),
       (page) => {
-        pages.value = [...pages.value, page]
+        if (pagesOf.value === these && pages.value[pages.value.length - 1]?.next === cursor)
+          pages.value = [...pages.value, page]
       },
-      () => {
-        if (explorer.cursors.value[explorer.cursors.value.length - 1] === cursor)
-          explorer.cursors.value = explorer.cursors.value.slice(0, -1)
-      },
+      giveBack,
     )
   })
 
-  if (getCurrentScope()) onScopeDispose(() => asked.abort())
+  if (getCurrentScope())
+    onScopeDispose(() => {
+      disposed = true
+      again = false
+      asked.abort()
+    })
 
+  const which: Which[] = ['histogram', 'facets', 'rows', 'groups']
   return {
     buckets,
     bucketsAnswer,
     facets,
     rows: computed(() => pages.value.flatMap((p) => p.rows)),
-    next: computed(() => pages.value[pages.value.length - 1]?.next ?? null),
+    next: computed(() =>
+      pagesOf.value === current.value ? (pages.value[pages.value.length - 1]?.next ?? null) : null,
+    ),
     groups,
     loading,
-    error,
+    error: computed(() => which.map((w) => errors.value[w]).find((e) => e != null) ?? null),
   }
+}
+
+/** Whether `after` is `before` slid by the clock: the same fields and
+ * search over a window as long, later. */
+function slide(before: Question, after: Question) {
+  const span = (q: Question) => Date.parse(q.to) - Date.parse(q.from)
+  return (
+    Date.parse(after.to) > Date.parse(before.to) &&
+    span(after) === span(before) &&
+    JSON.stringify([after.fields, after.search]) === JSON.stringify([before.fields, before.search])
+  )
 }

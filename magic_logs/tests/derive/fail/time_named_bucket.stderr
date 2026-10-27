@@ -1,0 +1,5 @@
+error: `bucket` is a column of the counts themselves: rename this one
+  --> tests/derive/fail/time_named_bucket.rs:10:9
+   |
+10 |     pub bucket: DateTime<Utc>,
+   |         ^^^^^^

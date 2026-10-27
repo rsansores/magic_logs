@@ -26,11 +26,14 @@ and open http://localhost:5198/?server.
   - `set_up`: the migration, once, in one transaction, each relation made
     readable through a view in `api` by `govern`; the seed, once;
   - `govern`: the fleet's authorization. A view keeps the zones the
-    reader may see — every zone, unless the request's `x-zones` header
-    names some — and every question reads through those views;
+    reader may see — those the request's `x-zones` header names, every
+    zone for `*`, none without the header — and every question reads
+    through those views. A real host takes the zones from the reader's
+    session, not from a header the reader writes;
   - the handlers: `/api/page`, `/api/histogram`, `/api/facets`,
     `/api/grouped`, each in a transaction of its own that carries the
-    reader's zones, a refused question answered 400.
+    reader's zones; a refused question — a histogram of more than 1,000
+    bars among them — answered 400.
 
 ```sh
 curl -H 'x-zones: Harbor' "localhost:3001/api/facets?from=2026-10-01T00:00:00Z&to=2026-10-31T00:00:00Z"

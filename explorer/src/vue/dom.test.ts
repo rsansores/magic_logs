@@ -207,6 +207,125 @@ describe('useLogFetch', () => {
   })
 })
 
+describe('useLogFetch, round the edges', () => {
+  it('reads no page after the last question’s pages while the new first page is on its way', async () => {
+    const asked: [Record<string, string[]>, string | undefined][] = []
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'] })
+      const c = counting(1_000, async (q, cursor) => {
+        asked.push([q.fields, cursor])
+        await new Promise((r) => setTimeout(r, 1_000))
+        return {
+          rows: [{ id: `${q.fields.kind ?? 'all'}:${cursor ?? 'first'}` }],
+          next: q.fields.kind ? null : 'c1',
+        }
+      })
+      return { e, answers: useLogFetch(e, c.fetchers) }
+    })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(value.answers.next.value).toBe('c1')
+    value.e.toggle('kind', 'door')
+    await nextTick()
+    expect(value.answers.next.value).toBeNull()
+    value.e.more('c1')
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(asked.some(([fields, cursor]) => fields.kind && cursor)).toBe(false)
+    expect(value.answers.rows.value.map((r) => r.id)).toEqual(['door:first'])
+    scope.stop()
+  })
+
+  it('reads on after a refresh of a window that does not slide', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'] })
+      const c = counting()
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.zoom({ from: new Date(now - 3 * HOUR), to: new Date(now - HOUR) })
+    await vi.runAllTimersAsync()
+    value.e.more(value.answers.next.value)
+    await vi.runAllTimersAsync()
+    value.e.refresh()
+    await vi.runAllTimersAsync()
+    expect(value.answers.rows.value.map((r) => r.id)).toEqual(['first'])
+    value.e.more(value.answers.next.value)
+    await vi.runAllTimersAsync()
+    expect(value.answers.rows.value.map((r) => r.id)).toEqual(['first', 'c1'])
+    scope.stop()
+  })
+
+  it('asks a reader’s change at once while live, dropping the answer on its way', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 60_000 })
+      const c = counting(5_000)
+      c.fetchers.grouped = async (q) => {
+        await new Promise((r) => setTimeout(r, 5_000))
+        return [{ top: 'u1', value: q.fields.kind?.[0] ?? 'any', count: 1, first_at: null, last_at: null }]
+      }
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(100)
+    value.e.toggle('kind', 'door')
+    await vi.advanceTimersByTimeAsync(5_100)
+    expect(value.answers.groups.value.map((g) => g.value)).toEqual(['door'])
+    scope.stop()
+  })
+
+  it('asks nothing once its scope is gone', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(2_500)
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(1_100)
+    scope.stop()
+    const asked = value.c.asked.histogram
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(value.c.asked.histogram).toBe(asked)
+  })
+
+  it('clears a failure once its part is answered', async () => {
+    let fail = true
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'] })
+      const c = counting(0, async (_q, cursor) => {
+        if (cursor && fail) throw new Error('503')
+        return { rows: [{ id: cursor ?? 'first' }], next: cursor ? null : 'c1' }
+      })
+      return { e, answers: useLogFetch(e, c.fetchers) }
+    })
+    await vi.runAllTimersAsync()
+    value.e.more(value.answers.next.value)
+    await vi.runAllTimersAsync()
+    expect(value.answers.error.value).toBeInstanceOf(Error)
+    fail = false
+    value.e.more(value.answers.next.value)
+    await vi.runAllTimersAsync()
+    expect(value.answers.error.value).toBeNull()
+    scope.stop()
+  })
+})
+
+describe('a window at its bounds', () => {
+  it('keeps a brush past the longest window to the longest, ending where it ends', () => {
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], longest: 10 * HOUR }))
+    e.zoom({ from: new Date(now - 11 * HOUR), to: new Date(now) })
+    expect(e.preset.value).toBe('custom')
+    expect(Date.parse(e.question.value.to) - Date.parse(e.question.value.from)).toBe(10 * HOUR)
+    expect(e.question.value.to).toBe(new Date(now).toISOString())
+    scope.stop()
+  })
+
+  it('reads a custom window without instants as the default one, and says so', () => {
+    at('/?window=custom')
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], store: urlStore() }))
+    expect(e.preset.value).toBe('24h')
+    expect(window.location.search).toBe('')
+    scope.stop()
+  })
+})
+
 describe('useHistogram', () => {
   it('brushes across the plot and zooms to whole steps', () => {
     const { value, scope } = scoped(() => {

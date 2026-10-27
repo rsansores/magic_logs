@@ -2,9 +2,11 @@
 //! table, a few more every second, and the explorer's four questions served
 //! as JSON — as `magic_logs_explorer` reads them.
 //!
-//! A reader may be narrowed to some zones: the `x-zones` header names them,
-//! and the views every question reads through keep only their rows. That is
-//! the host's authorization, which magic_logs leaves to the host.
+//! A reader sees the zones the `x-zones` header names (`*`: every zone; no
+//! header: none), and the views every question reads through keep only
+//! their rows. That is the host's authorization, which magic_logs leaves to
+//! the host: a real one takes the reader's zones from its session, not from
+//! a header the reader writes.
 
 use axum::{
     extract::{Query, State},
@@ -45,17 +47,20 @@ pub struct Event {
     pub message: String,
 }
 
+/// The most bars a histogram is drawn in.
+const MOST_BARS: i64 = 1_000;
+
 /// The fields a reader may filter and count by.
 const FIELDS: [&str; 4] = ["level", "kind", "zone", "unit"];
 
 /// Each relation read through a view that keeps the zones the reader may
-/// see: all of them when `fleet.zones` is not set. The setting is read in a
-/// scalar subquery, once per query rather than once per row.
+/// see: every zone for `*`, none when `fleet.zones` is not set. The setting
+/// is read in a scalar subquery, once per query rather than once per row.
 fn govern(g: &Governed) -> String {
     let scope = g.scope.expect("the fleet's events are scoped by zone");
     format!(
         "CREATE VIEW \"{vs}\".\"{v}\" AS SELECT * FROM \"{s}\".\"{r}\" \
-          WHERE (SELECT coalesce(current_setting('fleet.zones', true), '')) = '' \
+          WHERE (SELECT current_setting('fleet.zones', true)) = '*' \
              OR \"{scope}\" = ANY((SELECT string_to_array(current_setting('fleet.zones', true), ','))::text[]);",
         vs = g.view_schema,
         v = g.view,
@@ -298,6 +303,12 @@ async fn histogram_of(
             ))
         }
     };
+    // A finer step reads the rows: a month by the minute is refused.
+    if (filter.to - filter.from).num_seconds() / step.num_seconds() > MOST_BARS {
+        return Err(Refused::Question(format!(
+            "at most {MOST_BARS} bars: a coarser `step`, or a shorter window"
+        )));
+    }
     let mut tx = reader(&pool, &headers).await?;
     Ok(Json(
         histogram(&Event::SPEC, &filter, step)?
