@@ -14,10 +14,13 @@ import {
   useLogExplorer,
   useLogFetch,
 } from '../src/index.js'
+import { fleetServer } from './http.js'
 import { fields, fleet, levels, server, type Event } from './server.js'
 
-const now = Date.now()
-const api = server(fleet(now))
+// `?server` reads the fleet example's server (examples/fleet) through the
+// dev server's proxy; made-up data otherwise.
+const live = new URLSearchParams(window.location.search).has('server')
+const api = live ? fleetServer : server(fleet(Date.now()))
 
 const store = urlStore()
 const explorer = useLogExplorer({ fields, store })
@@ -76,7 +79,10 @@ const hovered = ref<number | null>(null)
           <span class="mark" aria-hidden="true">◢</span>
           <div>
             <h1>Fleet events</h1>
-            <p>magic_logs_explorer · made-up data, 30 days of 36 trucks</p>
+            <p>
+              magic_logs_explorer ·
+              {{ live ? 'the fleet example, on TimescaleDB' : 'made-up data, 30 days of 36 trucks' }}
+            </p>
           </div>
         </div>
         <div class="controls">

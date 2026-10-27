@@ -1,0 +1,10 @@
+# What the fleet needs: a PostgreSQL with TimescaleDB.
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg18.6-ts2.31.0
+    environment:
+      POSTGRES_USER: fleet
+      POSTGRES_PASSWORD: fleet
+      POSTGRES_DB: fleet
+    ports:
+      - "5435:5432"
