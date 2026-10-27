@@ -1,0 +1,270 @@
+pub mod magic_logs
+pub use magic_logs::MagicLog
+pub enum magic_logs::Error
+pub magic_logs::Error::FieldTwice(alloc::string::String)
+pub magic_logs::Error::NoTop
+pub magic_logs::Error::NothingSearched
+pub magic_logs::Error::UnknownField(alloc::string::String)
+pub magic_logs::Error::Window
+impl core::cmp::Eq for magic_logs::Error
+impl core::cmp::PartialEq for magic_logs::Error
+pub fn magic_logs::Error::eq(&self, &Self) -> bool
+impl core::error::Error for magic_logs::Error
+impl core::fmt::Debug for magic_logs::Error
+pub fn magic_logs::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for magic_logs::Error
+pub fn magic_logs::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for magic_logs::Error
+impl core::marker::Freeze for magic_logs::Error
+impl core::marker::Send for magic_logs::Error
+impl core::marker::Sync for magic_logs::Error
+impl core::marker::Unpin for magic_logs::Error
+impl core::marker::UnsafeUnpin for magic_logs::Error
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Error
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Error
+pub enum magic_logs::Tier
+pub magic_logs::Tier::Daily
+pub magic_logs::Tier::DailyTop
+pub magic_logs::Tier::Hourly
+pub magic_logs::Tier::Raw
+impl core::clone::Clone for magic_logs::Tier
+pub fn magic_logs::Tier::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Tier
+impl core::cmp::PartialEq for magic_logs::Tier
+pub fn magic_logs::Tier::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Tier
+pub fn magic_logs::Tier::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for magic_logs::Tier
+impl core::marker::StructuralPartialEq for magic_logs::Tier
+impl core::marker::Freeze for magic_logs::Tier
+impl core::marker::Send for magic_logs::Tier
+impl core::marker::Sync for magic_logs::Tier
+impl core::marker::Unpin for magic_logs::Tier
+impl core::marker::UnsafeUnpin for magic_logs::Tier
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Tier
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Tier
+pub struct magic_logs::Bucket
+pub magic_logs::Bucket::bucket: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub magic_logs::Bucket::count: i64
+pub magic_logs::Bucket::level: core::option::Option<alloc::string::String>
+impl core::clone::Clone for magic_logs::Bucket
+pub fn magic_logs::Bucket::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Bucket
+impl core::cmp::PartialEq for magic_logs::Bucket
+pub fn magic_logs::Bucket::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Bucket
+pub fn magic_logs::Bucket::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for magic_logs::Bucket
+impl serde_core::ser::Serialize for magic_logs::Bucket
+pub fn magic_logs::Bucket::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'a, R: sqlx_core::row::Row> sqlx_core::from_row::FromRow<'a, R> for magic_logs::Bucket where &'a str: sqlx_core::column::ColumnIndex<R>, chrono::datetime::DateTime<chrono::offset::utc::Utc>: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>, core::option::Option<alloc::string::String>: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>, i64: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>
+pub fn magic_logs::Bucket::from_row(&'a R) -> sqlx_core::error::Result<Self>
+impl core::marker::Freeze for magic_logs::Bucket
+impl core::marker::Send for magic_logs::Bucket
+impl core::marker::Sync for magic_logs::Bucket
+impl core::marker::Unpin for magic_logs::Bucket
+impl core::marker::UnsafeUnpin for magic_logs::Bucket
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Bucket
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Bucket
+pub struct magic_logs::Column
+pub magic_logs::Column::name: &'static str
+pub magic_logs::Column::sql: &'static str
+impl core::clone::Clone for magic_logs::Column
+pub fn magic_logs::Column::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Column
+impl core::cmp::PartialEq for magic_logs::Column
+pub fn magic_logs::Column::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Column
+pub fn magic_logs::Column::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for magic_logs::Column
+impl core::marker::StructuralPartialEq for magic_logs::Column
+impl core::marker::Freeze for magic_logs::Column
+impl core::marker::Send for magic_logs::Column
+impl core::marker::Sync for magic_logs::Column
+impl core::marker::Unpin for magic_logs::Column
+impl core::marker::UnsafeUnpin for magic_logs::Column
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Column
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Column
+pub struct magic_logs::Cursor
+pub magic_logs::Cursor::id: alloc::string::String
+pub magic_logs::Cursor::time: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+impl core::clone::Clone for magic_logs::Cursor
+pub fn magic_logs::Cursor::clone(&self) -> Self
+impl core::fmt::Debug for magic_logs::Cursor
+pub fn magic_logs::Cursor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for magic_logs::Cursor
+impl core::marker::Send for magic_logs::Cursor
+impl core::marker::Sync for magic_logs::Cursor
+impl core::marker::Unpin for magic_logs::Cursor
+impl core::marker::UnsafeUnpin for magic_logs::Cursor
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Cursor
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Cursor
+pub struct magic_logs::FacetCount
+pub magic_logs::FacetCount::count: i64
+pub magic_logs::FacetCount::field: alloc::string::String
+pub magic_logs::FacetCount::value: core::option::Option<alloc::string::String>
+impl core::clone::Clone for magic_logs::FacetCount
+pub fn magic_logs::FacetCount::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::FacetCount
+impl core::cmp::PartialEq for magic_logs::FacetCount
+pub fn magic_logs::FacetCount::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::FacetCount
+pub fn magic_logs::FacetCount::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for magic_logs::FacetCount
+impl serde_core::ser::Serialize for magic_logs::FacetCount
+pub fn magic_logs::FacetCount::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'a, R: sqlx_core::row::Row> sqlx_core::from_row::FromRow<'a, R> for magic_logs::FacetCount where &'a str: sqlx_core::column::ColumnIndex<R>, alloc::string::String: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>, core::option::Option<alloc::string::String>: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>, i64: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>
+pub fn magic_logs::FacetCount::from_row(&'a R) -> sqlx_core::error::Result<Self>
+impl core::marker::Freeze for magic_logs::FacetCount
+impl core::marker::Send for magic_logs::FacetCount
+impl core::marker::Sync for magic_logs::FacetCount
+impl core::marker::Unpin for magic_logs::FacetCount
+impl core::marker::UnsafeUnpin for magic_logs::FacetCount
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::FacetCount
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::FacetCount
+pub struct magic_logs::Field
+pub magic_logs::Field::column: magic_logs::Column
+pub magic_logs::Field::counted: bool
+pub magic_logs::Field::indexed: bool
+pub magic_logs::Field::per_top: bool
+impl core::clone::Clone for magic_logs::Field
+pub fn magic_logs::Field::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Field
+impl core::cmp::PartialEq for magic_logs::Field
+pub fn magic_logs::Field::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Field
+pub fn magic_logs::Field::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for magic_logs::Field
+impl core::marker::StructuralPartialEq for magic_logs::Field
+impl core::marker::Freeze for magic_logs::Field
+impl core::marker::Send for magic_logs::Field
+impl core::marker::Sync for magic_logs::Field
+impl core::marker::Unpin for magic_logs::Field
+impl core::marker::UnsafeUnpin for magic_logs::Field
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Field
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Field
+pub struct magic_logs::Filter
+pub magic_logs::Filter::fields: alloc::vec::Vec<(alloc::string::String, alloc::vec::Vec<alloc::string::String>)>
+pub magic_logs::Filter::from: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+pub magic_logs::Filter::search: core::option::Option<alloc::string::String>
+pub magic_logs::Filter::to: chrono::datetime::DateTime<chrono::offset::utc::Utc>
+impl magic_logs::Filter
+pub fn magic_logs::Filter::check(&self, &magic_logs::Spec) -> core::result::Result<(), magic_logs::Error>
+pub fn magic_logs::Filter::new(chrono::datetime::DateTime<chrono::offset::utc::Utc>, chrono::datetime::DateTime<chrono::offset::utc::Utc>) -> Self
+pub fn magic_logs::Filter::search(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn magic_logs::Filter::with(self, &str, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+impl core::clone::Clone for magic_logs::Filter
+pub fn magic_logs::Filter::clone(&self) -> Self
+impl core::fmt::Debug for magic_logs::Filter
+pub fn magic_logs::Filter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for magic_logs::Filter
+impl core::marker::Send for magic_logs::Filter
+impl core::marker::Sync for magic_logs::Filter
+impl core::marker::Unpin for magic_logs::Filter
+impl core::marker::UnsafeUnpin for magic_logs::Filter
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Filter
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Filter
+pub struct magic_logs::Governed<'a>
+pub magic_logs::Governed::relation: &'a str
+pub magic_logs::Governed::schema: &'a str
+pub magic_logs::Governed::scope: core::option::Option<&'a str>
+pub magic_logs::Governed::view: &'a str
+pub magic_logs::Governed::view_schema: &'a str
+impl<'a> core::clone::Clone for magic_logs::Governed<'a>
+pub fn magic_logs::Governed<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for magic_logs::Governed<'a>
+pub fn magic_logs::Governed<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for magic_logs::Governed<'a>
+impl<'a> core::marker::Freeze for magic_logs::Governed<'a>
+impl<'a> core::marker::Send for magic_logs::Governed<'a>
+impl<'a> core::marker::Sync for magic_logs::Governed<'a>
+impl<'a> core::marker::Unpin for magic_logs::Governed<'a>
+impl<'a> core::marker::UnsafeUnpin for magic_logs::Governed<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for magic_logs::Governed<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for magic_logs::Governed<'a>
+pub struct magic_logs::Group
+pub magic_logs::Group::count: i64
+pub magic_logs::Group::first_at: core::option::Option<chrono::datetime::DateTime<chrono::offset::utc::Utc>>
+pub magic_logs::Group::last_at: core::option::Option<chrono::datetime::DateTime<chrono::offset::utc::Utc>>
+pub magic_logs::Group::top: core::option::Option<alloc::string::String>
+pub magic_logs::Group::value: core::option::Option<alloc::string::String>
+impl core::clone::Clone for magic_logs::Group
+pub fn magic_logs::Group::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Group
+impl core::cmp::PartialEq for magic_logs::Group
+pub fn magic_logs::Group::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Group
+pub fn magic_logs::Group::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for magic_logs::Group
+impl serde_core::ser::Serialize for magic_logs::Group
+pub fn magic_logs::Group::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'a, R: sqlx_core::row::Row> sqlx_core::from_row::FromRow<'a, R> for magic_logs::Group where &'a str: sqlx_core::column::ColumnIndex<R>, core::option::Option<alloc::string::String>: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>, i64: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>, core::option::Option<chrono::datetime::DateTime<chrono::offset::utc::Utc>>: sqlx_core::decode::Decode<'a, <R as sqlx_core::row::Row>::Database> + sqlx_core::types::Type<<R as sqlx_core::row::Row>::Database>
+pub fn magic_logs::Group::from_row(&'a R) -> sqlx_core::error::Result<Self>
+impl core::marker::Freeze for magic_logs::Group
+impl core::marker::Send for magic_logs::Group
+impl core::marker::Sync for magic_logs::Group
+impl core::marker::Unpin for magic_logs::Group
+impl core::marker::UnsafeUnpin for magic_logs::Group
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Group
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Group
+pub struct magic_logs::Spec
+pub magic_logs::Spec::fields: &'static [magic_logs::Field]
+pub magic_logs::Spec::id: magic_logs::Column
+pub magic_logs::Spec::level: core::option::Option<magic_logs::Column>
+pub magic_logs::Spec::name: &'static str
+pub magic_logs::Spec::schema: &'static str
+pub magic_logs::Spec::scope: core::option::Option<&'static str>
+pub magic_logs::Spec::search: &'static [&'static str]
+pub magic_logs::Spec::search_with: core::option::Option<&'static str>
+pub magic_logs::Spec::storage: magic_logs::Storage
+pub magic_logs::Spec::tenant: core::option::Option<&'static str>
+pub magic_logs::Spec::time: &'static str
+pub magic_logs::Spec::top: core::option::Option<magic_logs::Column>
+pub magic_logs::Spec::view_schema: &'static str
+impl magic_logs::Spec
+pub fn magic_logs::Spec::counted(&self) -> alloc::vec::Vec<&'static str>
+pub fn magic_logs::Spec::counted_per_top(&self) -> alloc::vec::Vec<&'static str>
+pub fn magic_logs::Spec::field(&self, &str) -> core::option::Option<&'static magic_logs::Field>
+pub fn magic_logs::Spec::relation(&self, magic_logs::Tier) -> alloc::string::String
+pub fn magic_logs::Spec::tiers(&self) -> alloc::vec::Vec<magic_logs::Tier>
+impl core::clone::Clone for magic_logs::Spec
+pub fn magic_logs::Spec::clone(&self) -> Self
+impl core::fmt::Debug for magic_logs::Spec
+pub fn magic_logs::Spec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for magic_logs::Spec
+impl core::marker::Freeze for magic_logs::Spec
+impl core::marker::Send for magic_logs::Spec
+impl core::marker::Sync for magic_logs::Spec
+impl core::marker::Unpin for magic_logs::Spec
+impl core::marker::UnsafeUnpin for magic_logs::Spec
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Spec
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Spec
+pub struct magic_logs::Storage
+pub magic_logs::Storage::chunk: &'static str
+pub magic_logs::Storage::compress_after: &'static str
+pub magic_logs::Storage::segment_by: core::option::Option<&'static str>
+impl core::clone::Clone for magic_logs::Storage
+pub fn magic_logs::Storage::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Storage
+impl core::cmp::PartialEq for magic_logs::Storage
+pub fn magic_logs::Storage::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Storage
+pub fn magic_logs::Storage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for magic_logs::Storage
+impl core::marker::StructuralPartialEq for magic_logs::Storage
+impl core::marker::Freeze for magic_logs::Storage
+impl core::marker::Send for magic_logs::Storage
+impl core::marker::Sync for magic_logs::Storage
+impl core::marker::Unpin for magic_logs::Storage
+impl core::marker::UnsafeUnpin for magic_logs::Storage
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Storage
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Storage
+pub trait magic_logs::MagicLog
+pub const magic_logs::MagicLog::SPEC: magic_logs::Spec
+pub fn magic_logs::counts_tier(&magic_logs::Spec, &magic_logs::Filter, core::option::Option<chrono::Duration>) -> magic_logs::Tier
+pub fn magic_logs::facets(&magic_logs::Spec, &magic_logs::Filter, &[&str]) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
+pub fn magic_logs::grouped(&magic_logs::Spec, &magic_logs::Filter, &str, i64) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
+pub fn magic_logs::histogram(&magic_logs::Spec, &magic_logs::Filter, chrono::Duration) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
+pub fn magic_logs::migration(&magic_logs::Spec, impl core::ops::function::Fn(&magic_logs::Governed<'_>) -> alloc::string::String) -> alloc::string::String
+pub fn magic_logs::page(&magic_logs::Spec, &magic_logs::Filter, core::option::Option<&magic_logs::Cursor>, i64) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
+pub fn magic_logs::per_top_tier(&magic_logs::Spec, &magic_logs::Filter) -> magic_logs::Tier
