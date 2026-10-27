@@ -30,7 +30,12 @@ export function urlStore(): Store {
     // reads it, as they were.
     const raw = computed(() => params.value.get(key))
     return computed<T>({
-      get: () => (raw.value == null ? initial : (codec.parse(raw.value) ?? initial)),
+      // Frozen: the address is the value, so a host that changes what it
+      // read (`push`) is told at once — it writes a new value instead.
+      get: () =>
+        frozen(
+          raw.value == null ? structuredClone(initial) : (codec.parse(raw.value) ?? structuredClone(initial)),
+        ),
       set(value) {
         const text = codec.serialize(value)
         const put = (into: URLSearchParams) => {
@@ -51,4 +56,8 @@ export function urlStore(): Store {
       },
     })
   }
+}
+
+function frozen<T>(value: T): T {
+  return typeof value === 'object' && value !== null ? Object.freeze(value) : value
 }

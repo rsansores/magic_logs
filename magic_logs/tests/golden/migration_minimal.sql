@@ -29,6 +29,11 @@ WITH NO DATA;
 SELECT add_continuous_aggregate_policy('"telemetry"."pings_hourly"', start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');
 SELECT add_continuous_aggregate_policy('"telemetry"."pings_daily"', start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour');
 
+ALTER MATERIALIZED VIEW "telemetry"."pings_hourly" SET (timescaledb.enable_columnstore = true);
+CALL add_columnstore_policy('"telemetry"."pings_hourly"', after => INTERVAL '2 days');
+ALTER MATERIALIZED VIEW "telemetry"."pings_daily" SET (timescaledb.enable_columnstore = true);
+CALL add_columnstore_policy('"telemetry"."pings_daily"', after => INTERVAL '2 days');
+
 SELECT setup_governed_view('public', 'pings', 'telemetry', 'pings', NULL);
 SELECT setup_governed_view('public', 'pings_hourly', 'telemetry', 'pings_hourly', NULL);
 SELECT setup_governed_view('public', 'pings_daily', 'telemetry', 'pings_daily', NULL);

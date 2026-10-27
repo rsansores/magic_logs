@@ -887,3 +887,57 @@ async fn facets_and_groups_answer_what_the_rows_answer_for_any_window(pool: PgPo
         }
     }
 }
+
+#[sqlx::test(migrations = false)]
+async fn compressed_counts_take_late_rows_and_answer_what_the_rows_answer(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    // The rows and every count compressed, as their policies would.
+    let mut relations = vec!["private.events".to_owned()];
+    for tier in [Tier::Hourly, Tier::Daily, Tier::HourlyTop, Tier::DailyTop] {
+        relations.push(format!("private.{}", spec.relation(tier)));
+    }
+    for relation in &relations {
+        let compressed: i64 = sqlx::query_scalar(&format!(
+            "SELECT count(compress_chunk(c, if_not_compressed => true)) FROM show_chunks('{relation}') c"
+        ))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(compressed > 0, "{relation}");
+    }
+    // Late rows into a compressed day, then the refresh the policies run.
+    sqlx::raw_sql(&format!(
+        "INSERT INTO private.events SELECT gen_random_uuid(), '{}'::timestamptz + n * interval '1 minute', \
+         '{TENANT}', '00000000-0000-0000-0000-000000000002', 'Error', 'gps', \
+         '00000000-0000-0000-0000-0000000000a3', NULL, 'unit 3 came late' FROM generate_series(1, 90) n",
+        (day() + Duration::days(1) + Duration::hours(7)).to_rfc3339()
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    refresh(&pool).await;
+    let filter = Filter::new(
+        day() + Duration::minutes(31),
+        day() + Duration::days(3) + Duration::hours(2) + Duration::minutes(5),
+    );
+    let (counted, raw) = both_facets(&pool, &filter, &["level", "kind", "unit_id"]).await;
+    assert_eq!(counted, raw);
+    let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
+    assert_eq!(counted, raw);
+    let mut counted: Vec<Group> = grouped(&spec, &filter, "kind", 100)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let mut raw: Vec<Group> = grouped(&spec, &filter.clone().search("unit"), "kind", 100)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    counted.sort_by(|a, b| (&a.top, &a.value).cmp(&(&b.top, &b.value)));
+    raw.sort_by(|a, b| (&a.top, &a.value).cmp(&(&b.top, &b.value)));
+    assert_eq!(counted, raw);
+}

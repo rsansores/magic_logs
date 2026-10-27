@@ -1,6 +1,7 @@
-//! The explorer's four questions, each read from the cheapest table that
-//! answers it: the rows for a page, and the counts — by hour, by day, by day
-//! and `top` — unless the filter names something they do not keep.
+//! The explorer's four questions, each read from the cheapest tables that
+//! answer it: the rows for a page, and the counts — by hour and by day, and
+//! by hour and by day per `top` — unless the filter names something they do
+//! not keep.
 
 use chrono::{DateTime, Duration, Utc};
 use sqlx::{Postgres, QueryBuilder};

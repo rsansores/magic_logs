@@ -7,7 +7,7 @@ import { listOf, text } from '../core/codec.js'
 import FacetHost from './FacetHost.test.vue'
 import PartsHost from './PartsHost.test.vue'
 import LogRows from './LogRows.vue'
-import { useHistogram } from './parts.js'
+import { useFacet, useHistogram } from './parts.js'
 import { urlStore } from './store.js'
 import { useLogExplorer } from './useLogExplorer.js'
 import { useLogFetch, type LogFetchers } from './useLogFetch.js'
@@ -347,10 +347,12 @@ describe('useLogFetch while a slide waits', () => {
     const { value, scope } = live()
     value.e.live.value = true
     await vi.advanceTimersByTimeAsync(1_100)
+    // Live off asks the slid question at once; the refresh asks once more;
+    // the answers that waited, landing, ask nothing again.
     value.e.live.value = false
     value.e.refresh()
     await vi.advanceTimersByTimeAsync(10_000)
-    expect(value.c.asked.histogram).toBe(2)
+    expect(value.c.asked.histogram).toBe(3)
     scope.stop()
   })
 
@@ -596,6 +598,89 @@ describe('round seven', () => {
     value.q.value = 'x'
     expect(value.kind.value).toEqual([])
     expect(window.location.search).toBe('?kind=door&q=x')
+    scope.stop()
+  })
+})
+
+describe('round eight', () => {
+  it('waits for a server steadily slower than two slides as long as it takes', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(0)
+      let landed = 0
+      c.fetchers.histogram = (_q, step, signal) =>
+        new Promise((resolve, reject) => {
+          c.asked.histogram++
+          const t = setTimeout(() => {
+            landed++
+            resolve([{ bucket: new Date(now).toISOString(), level: step.name, count: 1 }])
+          }, 3_500)
+          signal.addEventListener('abort', () => (clearTimeout(t), reject(signal.reason)))
+        })
+      return { e, c, answers: useLogFetch(e, c.fetchers), landed: () => landed }
+    })
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(40_000)
+    // After the first rounds settle, every ask lands: none is thrown away.
+    expect(value.landed()).toBeGreaterThanOrEqual(value.c.asked.histogram - 2)
+    scope.stop()
+  })
+
+  it('asks the slid question when live is turned off while it waits', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(0)
+      let first = true
+      c.fetchers.histogram = () => {
+        c.asked.histogram++
+        if (first) return ((first = false), new Promise(() => {}))
+        return Promise.resolve([])
+      }
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(1_100)
+    value.e.live.value = false
+    await vi.advanceTimersByTimeAsync(10)
+    expect(value.c.asked.histogram).toBe(2)
+    expect(value.answers.next.value).toBe('c1')
+    scope.stop()
+  })
+
+  it('refuses an instant written without its offset, with either store', () => {
+    for (const store of [undefined, urlStore()]) {
+      const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], store }))
+      expect(() => (e.from.value = '2026-09-30T10:00')).toThrow(/RFC 3339/)
+      e.from.value = '2026-09-30T10:00:00+02:00'
+      expect(e.from.value).toBe('2026-09-30T08:00:00.000Z')
+      e.from.value = ''
+      expect(e.from.value).toBe('')
+      scope.stop()
+    }
+  })
+
+  it('hands a frozen value, so a change is written, never made in place', () => {
+    const { value, scope } = scoped(() => {
+      const store = urlStore()
+      return { kind: store<string[]>('kind', [], listOf()) }
+    })
+    expect(() => value.kind.value.push('x')).toThrow(TypeError)
+    expect(value.kind.value).toEqual([])
+    value.kind.value = []
+    expect(window.location.search).toBe('')
+    scope.stop()
+  })
+
+  it('chooses one value alone, and clears them, in a facet', () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'] })
+      return { e, f: useFacet(e, [{ field: 'kind', value: 'door', count: 1 }], 'kind') }
+    })
+    value.e.toggle('kind', 'gps')
+    value.f.only('door')
+    expect(value.e.fields.kind.value).toEqual(['door'])
+    value.f.clear()
+    expect(value.e.fields.kind.value).toEqual([])
     scope.stop()
   })
 })

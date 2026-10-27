@@ -115,9 +115,10 @@ How it behaves:
 - **Live slides a named window** every `liveEvery` ms (10 s). A slide while
   answers are on their way waits for them and asks once after, so a server
   slower than the slide still answers: a wait is given up after two
-  slides, then four, then eight, until a whole round answers. Anything the
-  reader changes is asked at once, and the answers on their way are
-  dropped. Reading back (`more`)
+  slides, then four, then eight, until a whole round answers — and after
+  one does, as many slides as that round took and one more. Anything the
+  reader changes, or turning live off, is asked at once, and the answers on
+  their way are dropped. Reading back (`more`)
   and zooming stop live: the window holds still while a reader reads it.
 - **Give your fetches a timeout.** A live wait is given up, but an answer
   that never comes holds `loading` until the next question: `fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) })`.
@@ -138,8 +139,10 @@ How it behaves:
   written directly, in any order and in separate ticks (a date picker): the
   store keeps what was written, and `shown` says which window is in effect —
   `custom` once the two instants read as one, the preset shown first until
-  then. Draw a preset control from `shown`, not `preset`. `zoom` and
-  `choose` write all three for you.
+  then. Draw a preset control from `shown`, not `preset`. An instant is
+  written as RFC 3339 with its offset (or `''` to clear it); anything else
+  throws, the same with every store. `zoom` and `choose` write all three
+  for you.
 - **In the browser.** `urlStore()` reads the address and `useLogFetch`
   asks as soon as it is called: on a server render, call them on the
   client (`onMounted`, or a client-only component), or the markup the
@@ -151,6 +154,9 @@ How it behaves:
   every bar is as wide as its step; a live window's last bar holds what has
   come so far. Label the axis and brush on `geometry.range`, not on the
   window asked. A brush or `zoomTo` ends no later than the window.
+- **A stored value is written, not changed.** `urlStore()` hands its values
+  frozen (the address is the value): write a new array rather than
+  `push`ing into the one read.
 - **One key, one thing.** A field stored under `window`, `from`, `to`, `q`
   or `live` — or two fields under one key — is refused when the explorer
   is made: give it a `key` of its own.

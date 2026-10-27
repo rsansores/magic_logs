@@ -51,8 +51,9 @@ the last hour.
 
 A refresh of your own (after a backfill, say) ends where the policy's
 would: `CALL refresh_continuous_aggregate('…_hourly', NULL, now() -
-interval '1 hour')`, the daily one at `now() - interval '1 day'`, hourly
-first. One that ends later (`NULL`, or in the future) moves the watermark
+interval '1 hour')`, the daily one at `now() - interval '1 day'` — each
+hourly count before its daily one, the pair per `top` too (the fleet
+example's `set_up` does it). One that ends later (`NULL`, or in the future) moves the watermark
 past now: a row that arrives in a bucket already counted is not read from
 the rows, and waits for the policy to reach that bucket — up to two days
 for the daily counts.
@@ -165,7 +166,12 @@ Storage: an uncompressed day is 4.2 GB, of which 1.3 GB is index;
 compressed, 0.4 GB. Thirty days, two of them uncompressed, are 17 GB. The
 counts: 92,000 hourly rows a day, 183,000 per day and unit, and 2.2 million
 per hour and unit — about a fifth of the rows, 275 MB a day before
-compression. Loading a
+compression. Every count is compressed after `compress_after`, as the
+rows are (TimescaleDB 2.18.1 is the first that compresses a count
+refreshed over all of history); a late row's refresh writes into its
+compressed chunks. The late-row costs above were measured before the
+counts per hour and unit existed: a late row now recounts those too.
+Loading a
 10-million-row day takes about 100 s; compressing it, 25 s. Ingesting
 through the governed view with foreign keys checked: 58,000 rows a second.
 

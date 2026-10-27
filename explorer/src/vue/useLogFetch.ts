@@ -76,7 +76,8 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   let waitedSlides = 0
   // How many slides a wait lasts before it is given up: two, doubled each
   // time one is given up, so a server slower than that is waited for longer
-  // until a whole round answers, and two again once one does.
+  // until a whole round answers; then as many as that round took, and one
+  // more.
   let patience = 2
   let disposed = false
   // Which asking the pages answer: until its first page lands, the pages on
@@ -113,7 +114,9 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
         inFlight--
         loading.value[which] = false
         // A whole round answered: the next wait is a short one again.
-        if (inFlight === 0) patience = 2
+        // A whole round answered: the next wait lasts as long as this one
+        // took, and a slide more — two at least.
+        if (inFlight === 0) patience = Math.max(2, waitedSlides + 1)
       }
       if (inFlight === 0 && again && !disposed) {
         again = false
@@ -214,6 +217,12 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
       },
       giveBack,
     )
+  })
+
+  // Live turned off while a slide waited: the slid question is asked now,
+  // or it would wait on answers that may never come.
+  watch(explorer.live, (on) => {
+    if (!on && again) askAll()
   })
 
   if (getCurrentScope())

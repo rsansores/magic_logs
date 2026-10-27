@@ -4,7 +4,7 @@ Issues and pull requests are welcome.
 
 ## The tests
 
-The suite needs a PostgreSQL with TimescaleDB preloaded (2.18 or later,
+The suite needs a PostgreSQL with TimescaleDB preloaded (2.18.1 or later,
 under its community license) whose user may create databases — each test
 gets one of its own, and creates the extension in it:
 
@@ -97,7 +97,7 @@ cargo +nightly-2026-10-10 public-api -p magic_logs --all-features -s > magic_log
   actions, the crates and the explorer's npm packages.
 - **workflows** — zizmor over `.github/`: every action pinned to a commit,
   no token left behind by a checkout, no expression injected into a script.
-- **test** — the suite against TimescaleDB 2.18 on PostgreSQL 14, the oldest
+- **test** — the suite against TimescaleDB 2.18.1 on PostgreSQL 14, the oldest
   it supports, and TimescaleDB 2.31 on PostgreSQL 18.
 - **diagnostics** — the derive's refusals, message by message, on the
   pinned rustc.

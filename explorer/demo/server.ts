@@ -75,7 +75,9 @@ export function fleet(now: number): Event[] {
     const n = Math.floor(rand() * 7 * busy)
     for (let i = 0; i < n; i++) {
       const unit = pick(units)
-      push(at + Math.floor(rand() * 2 * MINUTE), kindOf(), unit, zones[units.indexOf(unit) % zones.length]!)
+      // Nothing still to happen: within the two minutes, and before now.
+      const when = Math.min(at + Math.floor(rand() * 2 * MINUTE), now - 1)
+      push(when, kindOf(), unit, zones[units.indexOf(unit) % zones.length]!)
     }
   }
   const incident = now - 90 * MINUTE

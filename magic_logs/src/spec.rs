@@ -20,7 +20,7 @@ pub struct Spec {
     pub scope: Option<&'static str>,
     /// The ordered column the histogram is stacked by.
     pub level: Option<Column>,
-    /// The entity counted on its own, per day: the grouped view's rows.
+    /// The entity counted on its own, by hour and by day: the grouped view's rows.
     pub top: Option<Column>,
     /// Every column a filter may name, in declaration order.
     pub fields: &'static [Field],

@@ -127,8 +127,22 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     throw new Error(`the explorer keeps two things under "${twice}": give one a \`key\` of its own`)
 
   const preset = store(key('window', 'window'), initial, presetCodec)
-  const from = store(key('from', 'from'), '', instant)
-  const to = store(key('to', 'to'), '', instant)
+  // An instant written to the window is read as the store reads one: RFC
+  // 3339 with its offset, or nothing (''). Anything else is the host's
+  // mistake, said at once rather than read in the browser's zone by one
+  // store and dropped by another.
+  const checked = (piece: Ref<string>, name: string): Ref<string> =>
+    computed({
+      get: () => piece.value,
+      set(value) {
+        const read = value === '' ? '' : instant.parse(value)
+        if (read === undefined)
+          throw new Error(`\`${name}\` is an RFC 3339 instant with its offset, not "${value}"`)
+        piece.value = read
+      },
+    })
+  const from = checked(store(key('from', 'from'), '', instant), 'from')
+  const to = checked(store(key('to', 'to'), '', instant), 'to')
   const search = store(key('search', 'q'), '', text)
   const live = store(key('live', 'live'), false, flag)
 

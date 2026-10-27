@@ -49,6 +49,15 @@ SELECT add_continuous_aggregate_policy('"telemetry"."events_daily"', start_offse
 SELECT add_continuous_aggregate_policy('"telemetry"."events_hourly_unit"', start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');
 SELECT add_continuous_aggregate_policy('"telemetry"."events_daily_unit"', start_offset => NULL, end_offset => INTERVAL '1 day', schedule_interval => INTERVAL '1 hour');
 
+ALTER MATERIALIZED VIEW "telemetry"."events_hourly" SET (timescaledb.enable_columnstore = true);
+CALL add_columnstore_policy('"telemetry"."events_hourly"', after => INTERVAL '2 days');
+ALTER MATERIALIZED VIEW "telemetry"."events_daily" SET (timescaledb.enable_columnstore = true);
+CALL add_columnstore_policy('"telemetry"."events_daily"', after => INTERVAL '2 days');
+ALTER MATERIALIZED VIEW "telemetry"."events_hourly_unit" SET (timescaledb.enable_columnstore = true);
+CALL add_columnstore_policy('"telemetry"."events_hourly_unit"', after => INTERVAL '2 days');
+ALTER MATERIALIZED VIEW "telemetry"."events_daily_unit" SET (timescaledb.enable_columnstore = true);
+CALL add_columnstore_policy('"telemetry"."events_daily_unit"', after => INTERVAL '2 days');
+
 SELECT setup_governed_view('api', 'events', 'telemetry', 'events', 'zone_id');
 SELECT setup_governed_view('api', 'events_hourly', 'telemetry', 'events_hourly', 'zone_id');
 SELECT setup_governed_view('api', 'events_daily', 'telemetry', 'events_daily', 'zone_id');

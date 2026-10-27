@@ -48,7 +48,7 @@ the window, the facets, the histogram's geometry and its brush, the pages
 
 ## Requirements
 
-- PostgreSQL 14 or later, with TimescaleDB 2.18 or later under its
+- PostgreSQL 14 or later, with TimescaleDB 2.18.1 or later under its
   community license (the columnstore and continuous aggregates are not in
   the Apache-2.0-only build), preloaded.
 - Rust 1.85 or later; sqlx 0.8.
@@ -163,8 +163,9 @@ and a relation or index name past PostgreSQL's 63 bytes. A field named
 `migration` prints the SQL, one transaction's worth, for the table as it
 stands: the hypertable, the indexes a page reads (`time DESC, id DESC`,
 and one per `indexed` field and the `top`), the columnstore and its
-policy, the three counts and their refresh policies — and, for each of
-the four relations, whatever `govern` writes. Run it from your own
+policy, the four counts with their refresh and compression policies —
+and, for each of the five relations (the table and its counts), whatever
+`govern` writes. Run it from your own
 migrations; the [golden copy](magic_logs/tests/golden/migration.sql) shows
 what it writes.
 

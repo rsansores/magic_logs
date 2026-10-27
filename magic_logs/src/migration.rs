@@ -178,6 +178,25 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
     }
     push(policies.join("\n"));
 
+    // The counts compress as the rows do: the hourly per `top` hold a fifth
+    // as many rows as the table. A late row's refresh writes into their
+    // compressed chunks too.
+    let compressed: Vec<String> = spec
+        .tiers()
+        .into_iter()
+        .filter(|t| *t != Tier::Raw)
+        .map(|tier| {
+            let count = qualified(spec.schema, &spec.relation(tier));
+            format!(
+                "ALTER MATERIALIZED VIEW {count} SET (timescaledb.enable_columnstore = true);\n\
+                 CALL add_columnstore_policy({}, after => INTERVAL {});",
+                literal(&count),
+                literal(st.compress_after)
+            )
+        })
+        .collect();
+    push(compressed.join("\n"));
+
     let governed: Vec<String> = spec
         .tiers()
         .into_iter()
