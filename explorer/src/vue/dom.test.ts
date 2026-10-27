@@ -386,7 +386,7 @@ describe('useLogExplorer keys', () => {
     at('/?window=custom')
     window.dispatchEvent(new PopStateEvent('popstate'))
     await nextTick()
-    expect(e.preset.value).toBe('24h')
+    expect(e.shown.value).toBe('24h')
     scope.stop()
   })
 })
@@ -474,7 +474,7 @@ describe('round five', () => {
   it('freezes the window on screen when made custom, not instants left in the address', () => {
     at('/?from=2020-01-01T00:00:00Z&to=2020-01-02T00:00:00Z')
     const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], store: urlStore() }))
-    expect(window.location.search).toBe('')
+    expect(e.shown.value).toBe('24h')
     e.choose('custom')
     expect(e.question.value.to).toBe(new Date(now).toISOString())
     scope.stop()
@@ -573,6 +573,33 @@ describe('round six', () => {
   })
 })
 
+describe('round seven', () => {
+  it('keeps a window a date picker writes one instant per tick', async () => {
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [] }))
+    e.zoom({ from: new Date(now - 48 * HOUR), to: new Date(now - 24 * HOUR) })
+    e.from.value = new Date(now - 5 * HOUR).toISOString()
+    await nextTick()
+    expect(e.shown.value).toBe('24h')
+    e.to.value = new Date(now - 4 * HOUR).toISOString()
+    await nextTick()
+    expect(e.shown.value).toBe('custom')
+    expect(e.question.value.from).toBe(new Date(now - 5 * HOUR).toISOString())
+    scope.stop()
+  })
+
+  it('does not take a query change it did not see on an unrelated write', () => {
+    const { value, scope } = scoped(() => {
+      const store = urlStore()
+      return { kind: store('kind', [], listOf()), q: store('q', '', text) }
+    })
+    window.history.pushState(null, '', '/?kind=door')
+    value.q.value = 'x'
+    expect(value.kind.value).toEqual([])
+    expect(window.location.search).toBe('?kind=door&q=x')
+    scope.stop()
+  })
+})
+
 describe('a window at its bounds', () => {
   it('keeps a brush past the longest window to the longest, ending where it ends', () => {
     const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], longest: 10 * HOUR }))
@@ -586,8 +613,8 @@ describe('a window at its bounds', () => {
   it('reads a custom window without instants as the default one, and says so', () => {
     at('/?window=custom')
     const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], store: urlStore() }))
-    expect(e.preset.value).toBe('24h')
-    expect(window.location.search).toBe('')
+    expect(e.shown.value).toBe('24h')
+    expect(Date.parse(e.question.value.to) - Date.parse(e.question.value.from)).toBe(24 * HOUR)
     scope.stop()
   })
 })

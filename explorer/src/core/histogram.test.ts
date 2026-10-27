@@ -111,10 +111,10 @@ describe('selection', () => {
     expect(selection(live, 1, 1, HOUR)).toEqual({ from: new Date(at(3)), to: live.to })
   })
 
-  it('cuts the last bar where the window ends', () => {
+  it('draws the last bar whole, to the end of its bucket', () => {
     const g = geometry([], { from: new Date(at(0)), to: new Date(at(1) + HOUR / 2) }, HOUR)
-    expect(g.bars[0]!.width).toBeCloseTo(2 / 3)
-    expect(g.bars[1]!.width).toBeCloseTo(1 / 3)
+    expect(g.range.to.getTime()).toBe(at(2))
+    expect(g.bars.map((b) => b.width)).toEqual([0.5, 0.5])
   })
 
   it('selects one step for a press without a drag', () => {

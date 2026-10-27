@@ -62,8 +62,8 @@ export interface Geometry {
   counts: Tick[]
   /** Round instants across the plot, a handful at most. */
   times: Tick[]
-  /** What the plot spans: the window from the start of its first bucket,
-   * which the counts count whole. Fractions are of this; brush on it. */
+  /** What the plot spans: every bucket the window touches, whole, as the
+   * counts count them. Fractions are of this; brush on it. */
   range: Range
 }
 
@@ -75,12 +75,12 @@ export function geometry(
   step: number,
   levels: readonly string[] = [],
 ): Geometry {
-  // The plot begins where the first bucket does: a bar is a whole bucket,
-  // as the counts count it, never one clipped to a window that began
-  // inside it.
+  // The plot spans the buckets the window touches, whole: magic_logs counts
+  // each of them whole, the first and the last too.
   const from = Math.floor(range.from.getTime() / step) * step
-  const plot = { from: new Date(from), to: range.to }
-  const span = Math.max(range.to.getTime() - from, 1)
+  const to = Math.max(Math.ceil(range.to.getTime() / step) * step, from + step)
+  const plot = { from: new Date(from), to: new Date(to) }
+  const span = to - from
   const filled = fill(buckets, plot, step)
   const totals = filled.map((b) => Object.values(b.counts).reduce((sum, n) => sum + n, 0))
   const max = niceMax(totals.reduce((m, t) => Math.max(m, t), 0))

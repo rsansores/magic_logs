@@ -73,7 +73,7 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   let asked = new AbortController()
   let inFlight = 0
   let again = false
-  let waitingSince: number | null = null
+  let waitedSlides = 0
   // How many slides a wait lasts before it is given up: two, doubled each
   // time one is given up, so a server slower than that is waited for longer
   // until a whole round answers, and two again once one does.
@@ -128,7 +128,7 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   function askAll(anew = false) {
     if (disposed) return
     again = false
-    waitingSince = null
+    waitedSlides = 0
     inFlight = 0
     asked.abort()
     asked = new AbortController()
@@ -177,15 +177,17 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
         askedNow === askedBefore &&
         before !== undefined &&
         slide(before, question)
-      const waited = waitingSince !== null && Date.now() - waitingSince >= patience * explorer.liveEvery
-      if (waited) patience = Math.min(patience * 2, 64)
+      const waited = slid && waitedSlides >= patience
       if (slid && inFlight > 0 && !waited) {
         // The pages on screen answer the window before the slide: none is
         // read after them until the slid question's first page lands.
         again = true
-        waitingSince ??= Date.now()
+        waitedSlides++
         current.value = ++asking
-      } else askAll(!slid && askedNow === askedBefore)
+      } else {
+        if (waited) patience = Math.min(patience * 2, 64)
+        askAll(!slid && askedNow === askedBefore)
+      }
     },
     { immediate: true },
   )

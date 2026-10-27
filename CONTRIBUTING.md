@@ -15,8 +15,7 @@ cargo test --workspace --all-features
 ```
 
 `tests/explorer.rs` runs the migration on a real database and asks every
-question twice — from the counts and from the rows (a search of nothing
-reads the rows) — and holds the answers equal: a tier that counts wrong
+question twice — from the counts and from the rows (a search every test row matches reads them) — and holds the answers equal: a tier that counts wrong
 fails there.
 
 Each run includes the derive's suite (`magic_logs/tests/derive.rs`), which

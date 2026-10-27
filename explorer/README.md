@@ -129,27 +129,28 @@ How it behaves:
 - **The address is read defensively.** A preset is one of yours (not
   `toString`), an instant is RFC 3339 with its offset, a custom window
   spans at most `longest` (about two years), a field's values pass its
-  `accept`; anything else reads as the default. A value may hold a comma:
+  `accept`; anything else reads as the default (and `shown` says so). A value may hold a comma:
   it is written `\,`.
 - **Steps**: minutes for a window of up to two hours, five minutes up to
   eight hours, hours up to four days, six hours up to twenty, days past that
   — where magic_logs answers from its daily counts.
 - **The window is yours to write too.** `preset`, `from` and `to` may be
-  written directly (a date picker); they are judged together once the
-  tick's writes land. `zoom` and `choose` write them for you.
+  written directly, in any order and in separate ticks (a date picker): the
+  store keeps what was written, and `shown` says which window is in effect —
+  `custom` once the two instants read as one, the preset shown first until
+  then. Draw a preset control from `shown`, not `preset`. `zoom` and
+  `choose` write all three for you.
 - **In the browser.** `urlStore()` reads the address and `useLogFetch`
   asks as soon as it is called: on a server render, call them on the
   client (`onMounted`, or a client-only component), or the markup the
   server sends and the client's will differ. A live clock never runs
   outside a browser.
-- **A bar is a whole bucket.** magic_logs' counts count the bucket a window
-  begins in whole, so the plot begins where that bucket does
-  (`geometry.range`), and every bar is as wide as its step but the last,
-  cut where the window ends — it counts only what came before. Label the axis
-  and brush on `geometry.range`, not on the window asked. A question read
-  from the rows (a search, a step under an hour, a field the counts do not
-  keep) counts its first bucket from the window's start: that bar is drawn
-  whole too, holding part of its bucket.
+- **A bar is a whole bucket.** magic_logs' `histogram` counts every bucket
+  the window touches, whole — the first and the last too, whether it reads
+  the counts or the rows — so the plot spans them (`geometry.range`) and
+  every bar is as wide as its step; a live window's last bar holds what has
+  come so far. Label the axis and brush on `geometry.range`, not on the
+  window asked. A brush or `zoomTo` ends no later than the window.
 - **One key, one thing.** A field stored under `window`, `from`, `to`, `q`
   or `live` — or two fields under one key — is refused when the explorer
   is made: give it a `key` of its own.

@@ -15,8 +15,9 @@ export const memoryStore: Store = <T>(_key: string, initial: T) => ref(initial) 
 
 /** The address bar's query, written with `history.replaceState` so the back
  * button leaves the page rather than stepping through every filter. A value
- * equal to its initial one is left out of the address. Outside a browser,
- * plain refs. */
+ * equal to its initial one is left out of the address. It reads the address
+ * when made and on the back button: an app whose router changes the query
+ * hands the router's own store instead. Outside a browser, plain refs. */
 export function urlStore(): Store {
   if (typeof window === 'undefined') return memoryStore
   const params = shallowRef(new URLSearchParams(window.location.search))
@@ -31,17 +32,22 @@ export function urlStore(): Store {
     return computed<T>({
       get: () => (raw.value == null ? initial : (codec.parse(raw.value) ?? initial)),
       set(value) {
-        const next = new URLSearchParams(window.location.search)
         const text = codec.serialize(value)
-        if (text === codec.serialize(initial)) next.delete(key)
-        else next.set(key, text)
-        const query = next.toString()
+        const put = (into: URLSearchParams) => {
+          if (text === codec.serialize(initial)) into.delete(key)
+          else into.set(key, text)
+          return into
+        }
+        // The address as it is, this key changed; and what this store read
+        // of it, this key changed too — another key moves on the back
+        // button, not on an unrelated write.
+        const query = put(new URLSearchParams(window.location.search)).toString()
         window.history.replaceState(
           window.history.state,
           '',
           `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
         )
-        params.value = next
+        params.value = put(new URLSearchParams(params.value))
       },
     })
   }

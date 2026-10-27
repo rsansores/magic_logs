@@ -85,11 +85,14 @@ newest first, from an index.
   aggregate, so the views are where your rules go; the `scope` column (a
   tenant's district, a team, a zone) is kept in every count so a view can
   narrow each.
-- **Counts are of whole buckets.** A window that begins mid-hour counts that
-  hour from the hourly counts, and a week from the daily counts begins at
-  midnight UTC. An explorer shows them rounded; the rows themselves are
-  always exact. A question that names a field the counts do not keep, a
-  search, or a step finer than an hour reads the rows.
+- **A histogram's bars are whole buckets.** `histogram` counts every bucket
+  of its step the window touches, whole — the first and the last too —
+  whether it reads the counts or the rows: each bar is exactly its bucket.
+- **Facets and groups count whole hours or days.** Read from the counts, a
+  window that begins mid-hour counts that hour, and over the daily counts
+  it begins at midnight UTC. An explorer shows them rounded; the rows
+  themselves are always exact. A question that names a field the counts do
+  not keep, a search, or a step finer than an hour reads the rows.
 - **Late rows count.** The counts are refreshed over all of history: a
   refresh with nothing new costs milliseconds, and a row that arrives days
   late recounts only the buckets it fell in.

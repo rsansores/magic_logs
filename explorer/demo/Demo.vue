@@ -111,12 +111,12 @@ const hovered = ref<number | null>(null)
             <button
               v-for="p in explorer.presets"
               :key="p"
-              :class="{ on: explorer.preset.value === p }"
+              :class="{ on: explorer.shown.value === p }"
               @click="explorer.choose(p)"
             >
               {{ presetNames[p] ?? p }}
             </button>
-            <button :class="{ on: explorer.preset.value === 'custom' }" disabled>Zoomed</button>
+            <button :class="{ on: explorer.shown.value === 'custom' }" disabled>Zoomed</button>
           </div>
           <button
             class="live"

@@ -53,10 +53,16 @@ export function useHistogram(
   )
   // A brush is held to the plot it began on: an answer that lands while
   // the pointer is down redraws the bars, not what the brush selects.
-  const brush = shallowRef<{ a: number; b: number; plot: Range; step: number } | null>(null)
+  type Held = { a: number; b: number; plot: Range; step: number; until: number }
+  const brush = shallowRef<Held | null>(null)
 
-  const span = (b: { a: number; b: number; plot: Range; step: number }): Range =>
-    selection(b.plot, b.a, b.b, b.step)
+  // Whole steps of the plot, ending no later than the window asked: the
+  // plot runs to the end of its last bucket, which may be still to come.
+  const span = (b: Held): Range => {
+    const { from, to } = selection(b.plot, b.a, b.b, b.step)
+    const end = Math.min(to.getTime(), b.until)
+    return { from: new Date(Math.min(from.getTime(), end - 1)), to: new Date(end) }
+  }
   const at = (event: PointerEvent) => {
     const box = (event.currentTarget as Element).getBoundingClientRect()
     return box.width ? (event.clientX - box.left) / box.width : 0
@@ -81,7 +87,13 @@ export function useHistogram(
         if (event.button !== 0) return
         ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
         const f = at(event)
-        brush.value = { a: f, b: f, plot: drawn.value.range, step: on.value.step.ms }
+        brush.value = {
+          a: f,
+          b: f,
+          plot: drawn.value.range,
+          step: on.value.step.ms,
+          until: on.value.range.to.getTime(),
+        }
       },
       onPointermove(event) {
         if (brush.value) brush.value = { ...brush.value, b: at(event) }
@@ -98,7 +110,7 @@ export function useHistogram(
     },
     zoomTo(bar) {
       // The last bar is cut where the window ends: not into the future.
-      const end = Math.min(bar.end, drawn.value.range.to.getTime())
+      const end = Math.min(bar.end, on.value.range.to.getTime())
       toValue(explorer).zoom({ from: new Date(bar.at), to: new Date(end) })
     },
   }

@@ -162,7 +162,7 @@ async fn the_counts_answer_what_the_rows_answer(pool: PgPool) {
             magic_logs::counts_tier(&spec, &filter, Some(step)),
             Tier::Raw
         );
-        let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search(""), step)
+        let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search("unit"), step)
             .unwrap()
             .build_query_as()
             .fetch_all(&pool)
@@ -185,7 +185,7 @@ async fn the_counts_answer_what_the_rows_answer(pool: PgPool) {
             .unwrap();
     let mut raw: Vec<FacetCount> = facets(
         &spec,
-        &filter.clone().search(""),
+        &filter.clone().search("unit"),
         &["kind", "level", "zone_id", "unit_id"],
     )
     .unwrap()
@@ -214,7 +214,7 @@ async fn the_counts_answer_what_the_rows_answer(pool: PgPool) {
         .fetch_all(&pool)
         .await
         .unwrap();
-    let raw: Vec<Group> = grouped(&spec, &window(4).search(""), "kind", 5)
+    let raw: Vec<Group> = grouped(&spec, &window(4).search("unit"), "kind", 5)
         .unwrap()
         .build_query_as()
         .fetch_all(&pool)
@@ -405,7 +405,7 @@ async fn the_json_an_explorer_reads_is_the_contract(pool: PgPool) {
 }
 
 /// The histogram of `filter` by `step`, from the tier it picks and from the
-/// rows (a search of nothing reads them), sorted alike.
+/// rows (a search of what every test row says reads them), sorted alike.
 async fn both_histograms(
     pool: &PgPool,
     filter: &Filter,
@@ -418,7 +418,7 @@ async fn both_histograms(
         .fetch_all(pool)
         .await
         .unwrap();
-    let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search(""), step)
+    let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search("unit"), step)
         .unwrap()
         .build_query_as()
         .fetch_all(pool)
@@ -434,7 +434,7 @@ async fn both_facets(
 ) -> (Vec<FacetCount>, Vec<FacetCount>) {
     let spec = Event::SPEC;
     let mut answers = Vec::new();
-    for f in [filter.clone(), filter.clone().search("")] {
+    for f in [filter.clone(), filter.clone().search("unit")] {
         let mut rows: Vec<FacetCount> = facets(&spec, &f, fields)
             .unwrap()
             .build_query_as()
@@ -471,21 +471,37 @@ async fn a_question_narrowed_to_one_top_reads_its_daily_counts(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = false)]
-async fn a_window_that_begins_mid_bucket_counts_the_whole_bucket(pool: PgPool) {
+async fn a_histogram_counts_each_bucket_the_window_touches_whole(pool: PgPool) {
     setup(&pool).await;
-    let begins = day() + Duration::minutes(20);
-    let filter = Filter::new(begins, day() + Duration::hours(5));
-    let (counted, _) = both_histograms(&pool, &filter, Duration::hours(1)).await;
-    // The rows from the top of the first hour: [time_bucket(from), to).
-    let (_, whole) = both_histograms(
-        &pool,
-        &Filter::new(day(), day() + Duration::hours(5)),
+    // A window that begins and ends inside a bucket, at every tier: the
+    // counts and the rows alike count those buckets whole.
+    let unaligned = Filter::new(
+        day() + Duration::minutes(20),
+        day() + Duration::days(2) + Duration::hours(5) + Duration::minutes(10),
+    );
+    // From the start of the bucket the window begins in to the end of the
+    // one it ends in (every step here divides a day, so buckets count from
+    // midnight UTC).
+    let whole = |step: Duration| {
+        let s = step.num_seconds();
+        let floor = |t: DateTime<Utc>| t.timestamp() - t.timestamp().rem_euclid(s);
+        let at = |secs: i64| Utc.timestamp_opt(secs, 0).unwrap();
+        Filter::new(
+            at(floor(unaligned.from)),
+            at(floor(unaligned.to - Duration::seconds(1)) + s),
+        )
+    };
+    for step in [
         Duration::hours(1),
-    )
-    .await;
-    assert_eq!(counted, whole);
-    let (_, exact) = both_histograms(&pool, &filter, Duration::hours(1)).await;
-    assert_ne!(counted, exact, "the rows answer to the second");
+        Duration::hours(6),
+        Duration::days(1),
+        Duration::minutes(10),
+    ] {
+        let (counted, raw) = both_histograms(&pool, &unaligned, step).await;
+        assert_eq!(counted, raw, "by {step}");
+        let (exact, _) = both_histograms(&pool, &whole(step), step).await;
+        assert_eq!(counted, exact, "by {step}: the buckets touched, whole");
+    }
 }
 
 #[sqlx::test(migrations = false)]
@@ -495,7 +511,7 @@ async fn new_rows_count_at_once_and_late_ones_after_the_refresh(pool: PgPool) {
         format!(
             "INSERT INTO private.events SELECT gen_random_uuid(), '{}'::timestamptz + n * interval '1 second', \
              '{TENANT}', '00000000-0000-0000-0000-000000000001', 'Error', 'door', \
-             '00000000-0000-0000-0000-0000000000a1', NULL, 'late' FROM generate_series(1, 25) n",
+             '00000000-0000-0000-0000-0000000000a1', NULL, 'unit 1 came late' FROM generate_series(1, 25) n",
             at.to_rfc3339()
         )
     };
@@ -617,7 +633,7 @@ async fn a_scoped_reader_counts_only_its_scope_in_every_tier(pool: PgPool) {
             .fetch_all(&mut *tx)
             .await
             .unwrap();
-        let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search(""), step)
+        let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search("unit"), step)
             .unwrap()
             .build_query_as()
             .fetch_all(&mut *tx)
@@ -664,6 +680,14 @@ async fn a_search_reads_its_text_as_typed(pool: PgPool) {
     // The function folds `％` into `%` before the text is escaped.
     assert_eq!(found("50％").await, 10);
     assert_eq!(found("cpu＿at").await, 0);
+    // A blank search is no search: every row, NULL columns and all.
+    let all: Vec<Event> = page(&Event::SPEC, &window(1).search("  "), None, 10_000)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 144 * 3 + 20);
     assert_eq!(found("now\\").await, 10);
     assert_eq!(found("cpu_at").await, 0);
 }

@@ -34,8 +34,13 @@ It says, for a host upgrading:
   in the explorer's exports.
 
 A release that fails half-way — the derive published, the crate refused —
-is finished by fixing the cause and running the failed jobs again: a
-publication whose version the registry already has says so and succeeds.
+for a cause outside the code (a token, an approval, the network) is
+finished by fixing that cause and running the failed jobs again: they
+publish the same commit, and a publication whose version the registry
+already has says so and succeeds. A failure that needs a change to the
+code needs a new version: a registry never takes a version twice, and the
+crate pins the derive at its own, so a fixed derive under a version
+already published would leave the crate pinned to the one before.
 The release refuses a version that is not semver, one tagged already, and a
 run on any branch but `main`. The tag is pushed on its own; `main` is moved
 to it after, and refused when something was merged while the release ran —

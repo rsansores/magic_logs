@@ -89,8 +89,12 @@ A question that names the `top` (one unit) and asks by whole days reads
 the counts per day and `top`, when every other field it names is kept
 there (`per_top`): the hourly and daily counts do not keep the `top`.
 
-A count is of whole buckets: the window `[from, to)` takes every bucket
-that begins in `[time_bucket(from), to)`. A window from 10:20 counts from
+A histogram counts every bucket of its step the window touches, whole:
+`[time_bucket(step, from), time_bucket(step, to − 1µs) + step)`, the same
+bounds on the counts and on the rows, so each bar is exactly its bucket's
+count whichever it reads. A facet or a group read from the counts is of
+whole buckets of the counts: the window takes every bucket that begins in
+`[time_bucket(from), to)`. A window from 10:20 counts from
 10:00 in the hourly counts and from midnight UTC in the daily ones; the
 rows answer to the second. An explorer that shows a count rounds it
 (`1.2k`), and the rows it lists are always exact.

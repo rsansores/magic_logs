@@ -54,7 +54,8 @@ impl Filter {
         self
     }
 
-    /// The rows whose searched columns contain `text`.
+    /// The rows whose searched columns contain `text`. A blank `text` is no
+    /// search: every row, a column without a value included.
     pub fn search(mut self, text: impl Into<String>) -> Self {
         self.search = Some(text.into());
         self
@@ -74,10 +75,15 @@ impl Filter {
                 return Err(Error::FieldTwice(name.clone()));
             }
         }
-        if self.search.is_some() && spec.search.is_empty() {
+        if self.searched().is_some() && spec.search.is_empty() {
             return Err(Error::NothingSearched);
         }
         Ok(())
+    }
+
+    /// The search, unless it is blank.
+    fn searched(&self) -> Option<&str> {
+        self.search.as_deref().filter(|t| !t.trim().is_empty())
     }
 
     fn named(&self) -> impl Iterator<Item = &str> {
@@ -161,7 +167,7 @@ fn tier_keeping(spec: &Spec, filter: &Filter, step: Option<Duration>, also: Opti
         let micros = |d: Duration| d.num_microseconds().unwrap_or(i64::MAX);
         step.is_none_or(|s| s >= unit && micros(s) % micros(unit) == 0)
     };
-    if filter.search.is_some() || !whole(Duration::hours(1)) {
+    if filter.searched().is_some() || !whole(Duration::hours(1)) {
         return Tier::Raw;
     }
     let daily = match step {
@@ -204,7 +210,7 @@ pub fn per_top_tier(spec: &Spec, filter: &Filter) -> Tier {
     let kept = filter.named().all(|name| keeps(spec, Tier::DailyTop, name));
     // Whole days answer a window of days; a shorter one, its rows.
     let long = filter.to - filter.from > Duration::days(DAILY_FROM);
-    if spec.top.is_none() || !kept || !long || filter.search.is_some() {
+    if spec.top.is_none() || !kept || !long || filter.searched().is_some() {
         Tier::Raw
     } else {
         Tier::DailyTop
@@ -228,9 +234,26 @@ fn push_where(
     spec: &Spec,
     filter: &Filter,
     tier: Tier,
-    except: Option<&str>,
+    buckets: Option<Duration>,
 ) {
-    if tier == Tier::Raw {
+    if let Some(step) = buckets {
+        // A histogram counts every bucket of `step` the window touches,
+        // whole, whatever it reads: each bar is its bucket's count.
+        let at = match tier {
+            Tier::Raw => ident(spec.time),
+            _ => "bucket".to_owned(),
+        };
+        qb.push(format!(" WHERE {at} >= time_bucket("));
+        qb.push_bind(step_interval(step));
+        qb.push(", ");
+        qb.push_bind(filter.from);
+        qb.push(format!(") AND {at} < time_bucket("));
+        qb.push_bind(step_interval(step));
+        qb.push(", ");
+        qb.push_bind(filter.to);
+        qb.push(" - INTERVAL '1 microsecond') + ");
+        qb.push_bind(step_interval(step));
+    } else if tier == Tier::Raw {
         let time = ident(spec.time);
         qb.push(format!(" WHERE {time} >= "));
         qb.push_bind(filter.from);
@@ -247,7 +270,7 @@ fn push_where(
         qb.push_bind(filter.to);
     }
     for (name, values) in &filter.fields {
-        if values.is_empty() || Some(name.as_str()) == except {
+        if values.is_empty() {
             continue;
         }
         let Some(field) = spec.field(name) else {
@@ -261,7 +284,7 @@ fn push_where(
         qb.push_bind(values.clone());
         qb.push(format!("::{sql}[])::{sql}[])"));
     }
-    if let (Some(text), Tier::Raw) = (&filter.search, tier) {
+    if let (Some(text), Tier::Raw) = (filter.searched(), tier) {
         let wrap = |s: String| match spec.search_with {
             Some(f) => format!("{f}({s})"),
             None => s,
@@ -282,7 +305,7 @@ fn push_where(
                 "'%' || replace(replace(replace({}(",
                 spec.search_with.unwrap_or("")
             ));
-            qb.push_bind(text.clone());
+            qb.push_bind(text.to_owned());
             qb.push(r"), '\', '\\'), '%', '\%'), '_', '\_') || '%'");
         }
         qb.push(")");
@@ -346,7 +369,7 @@ pub fn histogram(
         ", {at}) AS bucket, {level} AS level, {count} AS count FROM {}",
         source(spec, tier)
     ));
-    push_where(&mut qb, spec, filter, tier, None);
+    push_where(&mut qb, spec, filter, tier, Some(step));
     qb.push(" GROUP BY 1, 2 ORDER BY 1, 2");
     Ok(qb)
 }

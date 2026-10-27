@@ -49,8 +49,12 @@ export interface LogExplorerOptions<F extends string> {
 }
 
 export interface LogExplorer<F extends string = string> {
-  /** A preset's name, or `custom` for `from` and `to`. */
+  /** A preset's name, or `custom` for `from` and `to`, as written. */
   preset: Ref<string>
+  /** The window in effect, which a control shows as chosen: the preset, or
+   * `custom` while `from` and `to` read as a window; the preset shown first
+   * otherwise. */
+  shown: ComputedRef<string>
   from: Ref<string>
   to: Ref<string>
   /** Each field's chosen values. */
@@ -163,38 +167,6 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   // backwards, too long — is the window shown first, said so: on load, and
   // whenever the store moves (the back button, a router).
   const longest = options.longest ?? LONGEST
-  // Checked after a write lands whole: zoom and choose write the window's
-  // three pieces one at a time, and a half-written window is not one.
-  let writing = false
-  const normalize = () => {
-    if (writing) return
-    // A named window keeps no instants: a later `custom` takes the window
-    // on screen, not ones left in the address.
-    if (preset.value !== 'custom') {
-      if (from.value || to.value) {
-        from.value = ''
-        to.value = ''
-      }
-      return
-    }
-    const span = Date.parse(to.value) - Date.parse(from.value)
-    if (span > 0 && span <= longest) return
-    preset.value = initial
-    from.value = ''
-    to.value = ''
-  }
-  const write = (change: () => void) => {
-    writing = true
-    try {
-      change()
-    } finally {
-      writing = false
-    }
-    normalize()
-  }
-  // Checked once the tick's writes have landed: a host writing `from`,
-  // `to` and `preset` one by one is judged on the window it wrote.
-  watch([preset, from, to], normalize, { immediate: true })
 
   const range = computed<Range>((before) => {
     const next = rangeOf(
@@ -206,6 +178,16 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     )
     return before && sameRange(before, next) ? before : next
   })
+  // The window in effect: `custom` only while its two instants read as one
+  // (no further apart than `longest`); otherwise the preset the range falls
+  // back on. The store is left as it was written: a host writing `from` and
+  // `to` one at a time is not undone between the two.
+  const shown = computed(() => {
+    if (preset.value !== 'custom') return presetOf(presets, preset.value) ? preset.value : initial
+    const span = Date.parse(to.value) - Date.parse(from.value)
+    return span > 0 && span <= longest ? 'custom' : initial
+  })
+
   const step = computed<Step>((before) => {
     const next = stepFor(range.value.to.getTime() - range.value.from.getTime())
     return before?.name === next.name ? before : next
@@ -230,6 +212,7 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
 
   return {
     preset,
+    shown,
     from,
     to,
     fields,
@@ -254,25 +237,22 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     zoom(next) {
       // A brush widened past the longest window keeps its end.
       const start = Math.max(next.from.getTime(), next.to.getTime() - longest)
-      write(() => {
-        from.value = new Date(start).toISOString()
-        to.value = next.to.toISOString()
-        preset.value = 'custom'
-      })
+      from.value = new Date(start).toISOString()
+      to.value = next.to.toISOString()
+      preset.value = 'custom'
       live.value = false
     },
     choose(next) {
       if (next !== 'custom' && !presetOf(presets, next)) return
-      write(() => {
-        if (next !== 'custom') {
-          from.value = ''
-          to.value = ''
-        } else if (!from.value || !to.value) {
-          from.value = range.value.from.toISOString()
-          to.value = range.value.to.toISOString()
-        }
-        preset.value = next
-      })
+      if (next !== 'custom') {
+        from.value = ''
+        to.value = ''
+      } else if (shown.value !== 'custom') {
+        // The window on screen, held still: not instants left in the store.
+        from.value = range.value.from.toISOString()
+        to.value = range.value.to.toISOString()
+      }
+      preset.value = next
       now.value = Date.now()
     },
     toggle(field, value) {
