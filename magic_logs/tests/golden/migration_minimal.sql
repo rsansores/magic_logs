@@ -1,11 +1,11 @@
 -- magic_logs: "telemetry"."pings", a hypertable of 1 day chunks compressed after 2 days, counted by hour and by day.
 
 DO $$
+DECLARE
+    v text := (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');
 BEGIN
-    IF (SELECT (regexp_match(extversion, '^(\d+)\.(\d+)'))::int[] FROM pg_extension
-         WHERE extname = 'timescaledb') < ARRAY[2, 21] THEN
-        RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later; this database has %',
-            (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');
+    IF (regexp_match(v, '^(\d+)\.(\d+)'))::int[] < ARRAY[2, 21] OR v = '2.22.0' THEN
+        RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later, but not 2.22.0; this database has %', v;
     END IF;
 END
 $$;

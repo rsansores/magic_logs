@@ -16,8 +16,8 @@ The first release.
     it. Facets and groups are exact for any window (`parts`); a
     histogram's bars are its step's buckets, whole (`histogram_tier`).
   - `serde`: the answers' rows serialize as the explorer reads them.
-  - TimescaleDB 2.21 or later on PostgreSQL 15 or later (the migration
-    refuses an older TimescaleDB); Rust 1.85.
+  - TimescaleDB 2.21 or later, not 2.22.0, on PostgreSQL 15 or later (the
+    migration refuses any other); Rust 1.85.
 - `magic_logs_explorer` (npm): the Vue 3 explorer without its looks —
   `useLogExplorer` (the window, the chosen values, the search, live, the
   pages; in memory, the address bar or the host's router), `useLogFetch`,

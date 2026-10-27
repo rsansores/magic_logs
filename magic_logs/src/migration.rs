@@ -86,11 +86,13 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
     ));
     // Older releases refresh compressed counts under TimescaleDB's cap on
     // rows decompressed by one statement: past it, a late row's refresh
-    // fails in the background, every time. Refused here, by name.
+    // fails in the background, every time. 2.22.0 loses the buckets of a
+    // refresh interrupted mid-batch, for good. Refused here, by name.
     push(
-        "DO $$\nBEGIN\n    IF (SELECT (regexp_match(extversion, '^(\\d+)\\.(\\d+)'))::int[] FROM pg_extension\n         WHERE extname = 'timescaledb') < ARRAY[2, 21] THEN\n        \
-         RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later; this database has %',\n            \
-         (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');\n    END IF;\nEND\n$$;"
+        "DO $$\nDECLARE\n    v text := (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');\n\
+         BEGIN\n    IF (regexp_match(v, '^(\\d+)\\.(\\d+)'))::int[] < ARRAY[2, 21] OR v = '2.22.0' THEN\n        \
+         RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later, but not 2.22.0; this database has %', v;\n    \
+         END IF;\nEND\n$$;"
             .to_owned(),
     );
     push(format!(

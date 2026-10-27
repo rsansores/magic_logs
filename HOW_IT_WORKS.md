@@ -57,9 +57,10 @@ A refresh of your own (after a backfill, say) ends where the policy's
 would: `CALL refresh_continuous_aggregate('…_hourly', NULL, now() -
 interval '1 hour')`, the daily one at `now() - interval '1 day'` — each
 hourly count before its daily one, the pair per `top` too. While a policy
-job refreshes the same count, yours fails with SQLSTATE `55P03`: retry it,
-or hold the job first (`SELECT alter_job(job_id, scheduled => false)`) and
-let it go after. One that ends later (`NULL`, or in the future) moves the watermark
+job refreshes the same count, yours fails with SQLSTATE `55P03`: retry it
+once the job is done. (Unscheduling the job with `alter_job` stops it
+mid-batch, and on some releases refuses a hierarchical count's policy.)
+One that ends later (`NULL`, or in the future) moves the watermark
 past now: a row that arrives in a bucket already counted is not read from
 the rows, and waits for the policy to reach that bucket — up to two days
 for the daily counts.
@@ -201,3 +202,38 @@ What is still slow:
 Before the indexes above, a page of a month took 5–9 s: the newest chunk
 had only TimescaleDB's default `(time DESC)` index, and the compressed
 chunks were ordered by id, so every page sorted ten million rows.
+
+## Operating it
+
+What an operator meets, at the first host's volume (10 million rows a
+day):
+
+- **The first refresh.** Over rows the table already held, the policies
+  count the whole history the first time they run, in batches of a
+  bucket, oldest first: about 20 minutes for the hourly counts of a year
+  and 50 for those per hour and unit, scaled from 6 million rows. Until
+  they are through, a question over history not counted yet reads the
+  rows: right, but slow. The daily counts may run before the hourly ones
+  are through, reading what the hourly ones have not counted from the
+  rows; they settle on their next run.
+- **An interrupted refresh** (a restart, a failover) leaves the buckets of
+  its unfinished batch short until the policy's next run or two count
+  them again. On 2.22.0 they stayed short for good, which is why the
+  migration refuses it.
+- **Retention.** The counts are refreshed over all of history, so a
+  refresh after `drop_chunks` on the rows recounts the dropped days from
+  nothing: their counts are gone too. Drop rows and counts together
+  (`drop_chunks` on each, or a retention policy on each). Counts kept
+  longer than their rows need a refresh window shorter than the rows'
+  retention (`alter_job(…, config => …)` with a `start_offset`), and a row
+  arriving later than that window is then never counted.
+- **Late rows** into compressed history insert fast — 300,000 new rows
+  into ten compressed days took 5 s — and are recounted as above. Rows re-sent
+  that the table already holds (`ON CONFLICT DO NOTHING`) are far slower
+  into compressed days — about 1,300 a second, as each conflict check
+  reads the compressed batches of every segment: a host whose devices
+  re-send on reconnect does well to drop what it already holds before
+  inserting.
+- **Upgrading TimescaleDB** (`ALTER EXTENSION timescaledb UPDATE`) keeps
+  the policies and their settings, and the counts as they were.
+

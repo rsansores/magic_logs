@@ -48,14 +48,17 @@ the window, the facets, the histogram's geometry and its brush, the pages
 
 ## Requirements
 
-- PostgreSQL 15 or later, with TimescaleDB 2.21 or later under its
-  community license (the columnstore and continuous aggregates are not in
-  the Apache-2.0-only build), preloaded.
+- PostgreSQL 15 or later, with TimescaleDB 2.21 or later — not 2.22.0 —
+  under its community license (the columnstore and continuous aggregates
+  are not in the Apache-2.0-only build), preloaded. The migration refuses
+  any other.
 - Rust 1.85 or later; sqlx 0.8.
-- The table, already there with its columns and a primary key that holds
-  the time column (a hypertable's unique keys must). Rows it already holds
-  are moved into chunks by the migration, which holds the table locked for
-  as long as that takes.
+- The table, already there — a plain table, not yet a hypertable — with
+  its columns and a primary key that holds the time column (a
+  hypertable's unique keys must). Rows it already holds are moved into
+  chunks by the migration, which holds the table locked for as long as
+  that takes and needs room for a second copy while it does;
+  [operating it](HOW_IT_WORKS.md#operating-it) says what follows.
 
 ## Why
 
@@ -96,8 +99,10 @@ newest first, from an index.
 - **Late rows count.** The counts are refreshed over all of history: a
   refresh with nothing new costs milliseconds, and a row that arrives days
   late recounts only the buckets it fell in.
-- **No retention.** Dropping old chunks is one TimescaleDB call
-  (`add_retention_policy`), and yours to make.
+- **No retention of its own.** The counts are refreshed over all of
+  history, so dropping old rows drops their counts at the next refresh:
+  drop both, or neither. [Operating it](HOW_IT_WORKS.md#operating-it) has
+  the rest.
 
 ## Defining a table
 

@@ -4,7 +4,7 @@ Issues and pull requests are welcome.
 
 ## The tests
 
-The suite needs a PostgreSQL with TimescaleDB preloaded (2.21 or later,
+The suite needs a PostgreSQL with TimescaleDB preloaded (2.21 or later, not 2.22.0,
 under its community license) whose user may create databases — each test
 gets one of its own, and creates the extension in it:
 
