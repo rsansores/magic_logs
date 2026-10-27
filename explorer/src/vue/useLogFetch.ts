@@ -8,7 +8,7 @@
 // does not empty the screen; an answer to a question no longer asked is
 // dropped. A live window that slides while answers are on their way waits
 // for them, and asks once more after: a server slower than the slide still
-// answers.
+// answers — within two slides, after which the wait is given up.
 
 import { computed, getCurrentScope, onScopeDispose, ref, shallowRef, watch, type Ref } from 'vue'
 import type { Bucket, BucketRow, FacetCountRow, GroupRow, Question } from '../core/contract/types.js'
@@ -50,7 +50,9 @@ export interface LogAnswers<Row> {
   groups: Readonly<Ref<GroupRow[]>>
   /** Which questions wait for an answer. */
   loading: Readonly<Ref<Record<Which, boolean>>>
-  /** A failure of the question asked now, until that part is answered. */
+  /** Each part's failure of the question asked now, until it is answered. */
+  errors: Readonly<Ref<Record<Which, unknown>>>
+  /** The first of `errors`, whichever part it is. */
   error: Readonly<Ref<unknown>>
 }
 
@@ -71,6 +73,7 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   let asked = new AbortController()
   let inFlight = 0
   let again = false
+  let waitingSince: number | null = null
   let disposed = false
   // Which asking the pages answer: until its first page lands, the pages on
   // screen are the last question's, and no page may be read after them.
@@ -116,6 +119,7 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   function askAll() {
     if (disposed) return
     again = false
+    waitingSince = null
     inFlight = 0
     asked.abort()
     asked = new AbortController()
@@ -152,17 +156,24 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   }
 
   watch(
-    [explorer.question, explorer.asked],
-    ([question, askedNow], [before, askedBefore]) => {
+    [explorer.question, explorer.asked, explorer.slides],
+    ([question, askedNow, slidesNow], [before, askedBefore, slidesBefore]) => {
       // The clock slid a live window while answers are on their way: they
-      // land, and the newest question is asked after them. Anything the
-      // reader changed is asked at once.
+      // land, and the newest question is asked after them — unless they
+      // have kept it waiting two slides already, when they are dropped.
+      // Anything the reader changed is asked at once.
+      if (question === before && askedNow === askedBefore) return
       const slid =
-        explorer.live.value && askedNow === askedBefore && before !== undefined && slide(before, question)
-      if (slid && inFlight > 0) {
+        slidesNow !== slidesBefore &&
+        askedNow === askedBefore &&
+        before !== undefined &&
+        slide(before, question)
+      const waited = waitingSince !== null && Date.now() - waitingSince >= 2 * explorer.liveEvery
+      if (slid && inFlight > 0 && !waited) {
         // The pages on screen answer the window before the slide: none is
         // read after them until the slid question's first page lands.
         again = true
+        waitingSince ??= Date.now()
         current.value = ++asking
       } else askAll()
     },
@@ -211,6 +222,7 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
     ),
     groups,
     loading,
+    errors,
     error: computed(() => which.map((w) => errors.value[w]).find((e) => e != null) ?? null),
   }
 }

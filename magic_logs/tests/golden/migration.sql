@@ -18,7 +18,7 @@ CREATE MATERIALIZED VIEW "telemetry"."events_hourly"
 WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
 SELECT time_bucket(INTERVAL '1 hour', "at") AS bucket, "tenant_id", "zone_id", "severity", "kind", count(*) AS events
   FROM "telemetry"."events"
- GROUP BY bucket, "tenant_id", "zone_id", "severity", "kind"
+ GROUP BY 1, "tenant_id", "zone_id", "severity", "kind"
 WITH NO DATA;
 
 CREATE MATERIALIZED VIEW "telemetry"."events_daily"
@@ -33,7 +33,7 @@ WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
 SELECT time_bucket(INTERVAL '1 day', "at") AS bucket, "tenant_id", "unit_id", "zone_id", "severity", "kind",
        count(*) AS events, min("at") AS first_at, max("at") AS last_at
   FROM "telemetry"."events"
- GROUP BY bucket, "tenant_id", "unit_id", "zone_id", "severity", "kind"
+ GROUP BY 1, "tenant_id", "unit_id", "zone_id", "severity", "kind"
 WITH NO DATA;
 
 SELECT add_continuous_aggregate_policy('"telemetry"."events_hourly"', start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');

@@ -10,10 +10,34 @@ use syn::{ext::IdentExt, parse_macro_input, Data, DeriveInput, Fields, LitStr, T
 /// may be named.
 const COUNTS_OWN: [&str; 4] = ["bucket", "events", "first_at", "last_at"];
 
-/// The SQL types the time may have, as `sql` names them: an instant. A
+/// Whether `sql` names an instant: `timestamptz` or `timestamp with time
+/// zone`, in any case, `pg_catalog.` or not, with a precision or not. A
 /// `timestamp` without a zone would be compared, and bucketed, in the
 /// session's time zone.
-const TIMES: [&str; 2] = ["timestamptz", "timestamp with time zone"];
+fn instant(sql: &str) -> bool {
+    let lower = sql.to_ascii_lowercase();
+    let lower = lower
+        .trim()
+        .strip_prefix("pg_catalog.")
+        .unwrap_or(lower.trim());
+    // The type without its precision: `timestamp(3) with time zone`.
+    let mut bare = String::new();
+    let mut rest = lower;
+    while let Some(open) = rest.find('(') {
+        let Some(close) = rest[open..].find(')') else {
+            return false;
+        };
+        let digits = &rest[open + 1..open + close];
+        if digits.trim().is_empty() || !digits.trim().chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+        bare.push_str(&rest[..open]);
+        rest = &rest[open + close + 1..];
+    }
+    bare.push_str(rest);
+    let bare = bare.split_whitespace().collect::<Vec<_>>().join(" ");
+    matches!(bare.as_str(), "timestamptz" | "timestamp with time zone")
+}
 
 /// The longest identifier PostgreSQL keeps whole.
 const LONGEST: usize = 63;
@@ -222,8 +246,14 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             .unwrap_or_default();
         // The time is bucketed into `bucket` in every count, and the counted
         // columns are kept beside it.
-        let counted =
-            flags.time || flags.tenant || flags.scope || flags.level || flags.facet || flags.top;
+        let kept = flags.tenant || flags.scope || flags.level || flags.facet;
+        if flags.time && kept {
+            return Err(syn::Error::new(
+                at,
+                "the time is counted by its bucket: it is not also a `tenant`, `scope`, `level` or `facet`",
+            ));
+        }
+        let counted = flags.time || kept || flags.top;
         if counted && COUNTS_OWN.contains(&name.as_str()) {
             return Err(syn::Error::new(
                 at,
@@ -261,7 +291,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             "the id breaks ties between rows of one time: it is another column",
         ));
     }
-    if !TIMES.contains(&time.sql.as_str()) {
+    if !instant(&time.sql) {
         return Err(syn::Error::new(
             time.at,
             format!(
@@ -415,4 +445,33 @@ fn sql_of(ty: &Type) -> Option<String> {
         }
         .to_owned(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::instant;
+
+    #[test]
+    fn an_instant_however_spelled() {
+        for sql in [
+            "timestamptz",
+            "TIMESTAMPTZ",
+            "timestamptz(3)",
+            "pg_catalog.timestamptz",
+            "timestamp with time zone",
+            "timestamp(6) with time zone",
+            "Timestamp  With Time Zone",
+        ] {
+            assert!(instant(sql), "{sql}");
+        }
+        for sql in [
+            "timestamp",
+            "timestamp(3)",
+            "timestamp without time zone",
+            "timestamptz(x)",
+            "date",
+        ] {
+            assert!(!instant(sql), "{sql}");
+        }
+    }
 }

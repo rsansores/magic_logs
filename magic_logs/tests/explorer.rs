@@ -700,14 +700,18 @@ async fn names_sql_must_quote_and_a_tenant_that_is_the_top_migrate(pool: PgPool)
         unit_id: i64,
         #[log(facet, per_top)]
         kind: String,
+        // Named like the counts' own column, and not counted: the counts
+        // group by their bucket, not by it.
+        #[log(search)]
+        bucket: String,
     }
-    let _ = |r: Reading| (r.id, r.at, r.unit_id, r.kind);
+    let _ = |r: Reading| (r.id, r.at, r.unit_id, r.kind, r.bucket);
     sqlx::raw_sql(
         "CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE SCHEMA \"Private\"; CREATE SCHEMA \"Api\"; \
          CREATE TABLE \"Private\".\"Events\" (id bigint NOT NULL, at timestamptz NOT NULL, \
-             unit_id bigint NOT NULL, kind text NOT NULL, PRIMARY KEY (id, at)); \
+             unit_id bigint NOT NULL, kind text NOT NULL, bucket text NOT NULL, PRIMARY KEY (id, at)); \
          INSERT INTO \"Private\".\"Events\" \
-           SELECT n, '2026-10-01'::timestamptz + n * interval '10 minutes', n % 3, 'k' || n % 2 \
+           SELECT n, '2026-10-01'::timestamptz + n * interval '10 minutes', n % 3, 'k' || n % 2, 's3://logs' \
            FROM generate_series(1, 600) n;",
     )
     .execute(&pool)

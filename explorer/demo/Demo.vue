@@ -75,10 +75,11 @@ const tickLabel = (at: number, plot: { from: Date; to: Date }) =>
 // A facet's largest values, and every chosen one however small.
 const shown = <T extends { chosen: boolean }>(items: T[], most: number) =>
   items.filter((i, n) => n < most || i.chosen)
-const failure = computed(() => {
-  const e = answers.error.value
+// Why a part has nothing to show, when its question failed.
+const failed = (part: 'histogram' | 'facets' | 'rows' | 'groups') => {
+  const e = answers.errors.value[part]
   return e == null ? null : e instanceof Error ? e.message : String(e)
-})
+}
 const busiest = (rows: { count: number }[]) => Math.max(1, ...rows.map((r) => r.count))
 const hovered = ref<number | null>(null)
 </script>
@@ -226,7 +227,10 @@ const hovered = ref<number | null>(null)
               </div>
             </div>
           </LogHistogram>
-          <p class="hint">Drag across the bars to zoom in; click a bar for its bucket alone.</p>
+          <p v-if="failed('histogram')" class="hint">
+            The histogram could not be read: {{ failed('histogram') }}
+          </p>
+          <p v-else class="hint">Drag across the bars to zoom in; click a bar for its bucket alone.</p>
         </section>
 
         <div class="toolbar">
@@ -273,8 +277,8 @@ const hovered = ref<number | null>(null)
                   <td>{{ e.zone }}</td>
                   <td class="message">{{ e.message }}</td>
                 </tr>
-                <tr v-if="failure">
-                  <td colspan="6" class="empty">The events could not be read: {{ failure }}</td>
+                <tr v-if="failed('rows')">
+                  <td colspan="6" class="empty">The events could not be read: {{ failed('rows') }}</td>
                 </tr>
                 <tr v-else-if="!rows.length && !loading">
                   <td colspan="6" class="empty">No events in this window</td>
@@ -290,7 +294,7 @@ const hovered = ref<number | null>(null)
         </section>
 
         <section v-else class="card table">
-          <LogGroups v-slot="{ groups }">
+          <LogGroups v-slot="{ groups, loading }">
             <table>
               <thead>
                 <tr>
@@ -311,6 +315,12 @@ const hovered = ref<number | null>(null)
                   </td>
                   <td class="mono">{{ g.first_at && moment.format(new Date(g.first_at)) }}</td>
                   <td class="mono">{{ g.last_at && moment.format(new Date(g.last_at)) }}</td>
+                </tr>
+                <tr v-if="failed('groups')">
+                  <td colspan="5" class="empty">The groups could not be read: {{ failed('groups') }}</td>
+                </tr>
+                <tr v-else-if="!groups.length && !loading">
+                  <td colspan="5" class="empty">No events in this window</td>
                 </tr>
               </tbody>
             </table>

@@ -4,6 +4,7 @@ import { effectScope, nextTick, watch } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listOf, text } from '../core/codec.js'
 import FacetHost from './FacetHost.test.vue'
+import PartsHost from './PartsHost.test.vue'
 import LogRows from './LogRows.vue'
 import { useHistogram } from './parts.js'
 import { urlStore } from './store.js'
@@ -386,6 +387,65 @@ describe('useLogExplorer keys', () => {
     await nextTick()
     expect(e.preset.value).toBe('24h')
     scope.stop()
+  })
+})
+
+describe('round four', () => {
+  it('zooms from one custom window to another, however far apart', () => {
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], longest: 30 * 24 * HOUR }))
+    e.zoom({ from: new Date(now - 10 * HOUR), to: new Date(now - 9 * HOUR) })
+    e.zoom({ from: new Date(now - 3 * HOUR), to: new Date(now - 2 * HOUR) })
+    expect(e.preset.value).toBe('custom')
+    expect(e.question.value.from).toBe(new Date(now - 3 * HOUR).toISOString())
+    e.zoom({ from: new Date(now - 29 * 24 * HOUR), to: new Date(now - 28 * 24 * HOUR) })
+    expect(e.preset.value).toBe('custom')
+    expect(e.question.value.to).toBe(new Date(now - 28 * 24 * HOUR).toISOString())
+    scope.stop()
+  })
+
+  it('gives up waiting on an answer that never comes after two slides', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(0)
+      c.fetchers.histogram = () => (c.asked.histogram++, new Promise(() => {}))
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(value.c.asked.histogram).toBeGreaterThanOrEqual(4)
+    expect(value.c.asked.page).toBeGreaterThanOrEqual(4)
+    scope.stop()
+  })
+
+  it('asks a preset chosen again at once while live, not as a slide', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 60_000 })
+      const c = counting(5_000)
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(1_000)
+    const before = value.c.asked.histogram
+    value.e.choose('24h')
+    await nextTick()
+    expect(value.c.asked.histogram).toBe(before + 1)
+    scope.stop()
+  })
+
+  it('draws the histogram, the rows and the groups inside a root', async () => {
+    const e = useLogExplorer({ fields: ['kind'] })
+    const c = counting()
+    const answers = useLogFetch(e, c.fetchers)
+    const wrapper = mount(PartsHost, { props: { explorer: e, answers } })
+    await vi.runAllTimersAsync()
+    expect(wrapper.find('.bars').text()).toBe('1')
+    expect(wrapper.find('.rows').text()).toBe('first')
+    expect(wrapper.find('.groups').text()).toBe('0')
+    await wrapper.find('button').trigger('click')
+    await vi.runAllTimersAsync()
+    expect(wrapper.find('.rows').text()).toBe('first,c1')
+    expect(wrapper.find('button').exists()).toBe(false)
+    wrapper.unmount()
   })
 })
 

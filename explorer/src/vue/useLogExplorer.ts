@@ -69,6 +69,11 @@ export interface LogExplorer<F extends string = string> {
   /** The cursors of the pages read so far: `undefined` for the first, then
    * each page's `next`. A changed question starts again from the newest. */
   cursors: Ref<(string | undefined)[]>
+  /** Moves each time the clock slides a live window: the only change to
+   * the question that is not the reader's. */
+  slides: Ref<number>
+  /** How often a live window slides, in ms. */
+  liveEvery: number
   /** Moves each time the question is asked again as it is (`refresh`): a
    * host's data layer re-asks on it, as `useLogFetch` does. */
   asked: Ref<number>
@@ -129,6 +134,8 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   // The clock a named window ends at: moved on a timer while live, and by
   // `refresh` otherwise, so the window holds still between two questions.
   const now = ref(Date.now())
+  const slides = ref(0)
+  const liveEvery = options.liveEvery ?? 10_000
   let ticking: ReturnType<typeof setInterval> | undefined
   watch(
     live,
@@ -137,7 +144,10 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
       ticking = undefined
       if (on) {
         now.value = Date.now()
-        ticking = setInterval(() => (now.value = Date.now()), options.liveEvery ?? 10_000)
+        ticking = setInterval(() => {
+          now.value = Date.now()
+          slides.value++
+        }, liveEvery)
       }
     },
     { immediate: true },
@@ -150,18 +160,27 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   // backwards, too long — is the window shown first, said so: on load, and
   // whenever the store moves (the back button, a router).
   const longest = options.longest ?? LONGEST
-  watch(
-    [preset, from, to],
-    () => {
-      if (preset.value !== 'custom') return
-      const span = Date.parse(to.value) - Date.parse(from.value)
-      if (span > 0 && span <= longest) return
-      preset.value = initial
-      from.value = ''
-      to.value = ''
-    },
-    { immediate: true, flush: 'sync' },
-  )
+  // Checked after a write lands whole: zoom and choose write the window's
+  // three pieces one at a time, and a half-written window is not one.
+  let writing = false
+  const normalize = () => {
+    if (writing || preset.value !== 'custom') return
+    const span = Date.parse(to.value) - Date.parse(from.value)
+    if (span > 0 && span <= longest) return
+    preset.value = initial
+    from.value = ''
+    to.value = ''
+  }
+  const write = (change: () => void) => {
+    writing = true
+    try {
+      change()
+    } finally {
+      writing = false
+    }
+    normalize()
+  }
+  watch([preset, from, to], normalize, { immediate: true, flush: 'sync' })
 
   const range = computed<Range>((before) => {
     const next = rangeOf(
@@ -210,6 +229,8 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     narrowed,
     cursors,
     asked,
+    slides,
+    liveEvery,
     more(next) {
       if (!next || cursors.value.includes(next)) return
       // Reading back through history holds the window still.
@@ -219,20 +240,24 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     zoom(next) {
       // A brush widened past the longest window keeps its end.
       const start = Math.max(next.from.getTime(), next.to.getTime() - longest)
-      from.value = new Date(start).toISOString()
-      to.value = next.to.toISOString()
-      preset.value = 'custom'
+      write(() => {
+        from.value = new Date(start).toISOString()
+        to.value = next.to.toISOString()
+        preset.value = 'custom'
+      })
       live.value = false
     },
     choose(next) {
-      if (next !== 'custom') {
-        from.value = ''
-        to.value = ''
-      } else if (!from.value || !to.value) {
-        from.value = range.value.from.toISOString()
-        to.value = range.value.to.toISOString()
-      }
-      preset.value = next
+      write(() => {
+        if (next !== 'custom') {
+          from.value = ''
+          to.value = ''
+        } else if (!from.value || !to.value) {
+          from.value = range.value.from.toISOString()
+          to.value = range.value.to.toISOString()
+        }
+        preset.value = next
+      })
       now.value = Date.now()
     },
     toggle(field, value) {

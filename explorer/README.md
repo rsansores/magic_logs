@@ -114,9 +114,13 @@ How it behaves:
   read.
 - **Live slides a named window** every `liveEvery` ms (10 s). A slide while
   answers are on their way waits for them and asks once after, so a server
-  slower than the slide still answers; anything the reader changes is asked
+  slower than the slide still answers (within two slides: then the wait is
+  given up); anything the reader changes is asked
   at once, and the answers on their way are dropped. Reading back (`more`)
   and zooming stop live: the window holds still while a reader reads it.
+- **Give your fetches a timeout.** A live wait is given up after two
+  slides, but an answer that never comes holds `loading` until the next
+  question: `fetch(url, { signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) })`.
 - **Pages follow their question.** Until a new question's first page
   arrives, the last question's rows stay on screen and `next` is null, so
   no page is read after them; `refresh()` starts the pages again too. A page
@@ -134,10 +138,13 @@ How it behaves:
   asks as soon as it is called: on a server render, call them on the
   client (`onMounted`, or a client-only component), or the markup the
   server sends and the client's will differ.
-- **A bar is a whole bucket.** The counts count the bucket a window
+- **A bar is a whole bucket.** magic_logs' counts count the bucket a window
   begins in whole, so the plot begins where that bucket does
   (`geometry.range`), and every bar is as wide as its step. Label the axis
-  and brush on `geometry.range`, not on the window asked.
+  and brush on `geometry.range`, not on the window asked. A question read
+  from the rows (a search, a step under an hour, a field the counts do not
+  keep) counts its first bucket from the window's start: that bar is drawn
+  whole too, holding part of its bucket.
 - **One key, one thing.** A field stored under `window`, `from`, `to`, `q`
   or `live` — or two fields under one key — is refused when the explorer
   is made: give it a `key` of its own.

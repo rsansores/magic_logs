@@ -16,7 +16,7 @@ CREATE MATERIALIZED VIEW "telemetry"."pings_hourly"
 WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS
 SELECT time_bucket(INTERVAL '1 hour', "at") AS bucket, count(*) AS events
   FROM "telemetry"."pings"
- GROUP BY bucket
+ GROUP BY 1
 WITH NO DATA;
 
 CREATE MATERIALIZED VIEW "telemetry"."pings_daily"

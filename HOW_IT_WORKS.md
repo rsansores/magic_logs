@@ -30,7 +30,7 @@ Three continuous aggregates — the counts — read it:
 |---|---|---|---|
 | `<name>_hourly` | an hour | the tenant, the scope, the level, every `facet` | short windows |
 | `<name>_daily` | a day, from the hourly | the same | windows past three days |
-| `<name>_daily_<top>` | a day | the tenant, the `top`, the scope, the level, every `per_top` facet; first and last time | grouped, and the `top`'s facet |
+| `<name>_daily_<top>` (a `top` ending in `_id` without it: `unit_id` gives `events_daily_unit`) | a day | the tenant, the `top`, the scope, the level, every `per_top` facet; first and last time | grouped, and the `top`'s facet |
 
 The daily counts are a continuous aggregate over the hourly one, so a day
 is summed from 24 rows, not from its events.

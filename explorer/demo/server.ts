@@ -111,9 +111,11 @@ const later = <T>(answer: T, signal: AbortSignal) =>
 export function server(events: Event[]) {
   return {
     histogram(q: Question, step: Step, signal: AbortSignal): Promise<BucketRow[]> {
+      // As magic_logs' counts do: the bucket the window begins in, whole.
+      const whole = { ...q, from: new Date(Math.floor(Date.parse(q.from) / step.ms) * step.ms).toISOString() }
       const counts = new Map<string, number>()
       for (const e of events) {
-        if (!matches(e, q)) continue
+        if (!matches(e, whole)) continue
         const key = `${Math.floor(e.at / step.ms) * step.ms}|${e.level}`
         counts.set(key, (counts.get(key) ?? 0) + 1)
       }

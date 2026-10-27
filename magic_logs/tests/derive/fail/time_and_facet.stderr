@@ -1,0 +1,5 @@
+error: the time is counted by its bucket: it is not also a `tenant`, `scope`, `level` or `facet`
+  --> tests/derive/fail/time_and_facet.rs:10:9
+   |
+10 |     pub at: DateTime<Utc>,
+   |         ^^

@@ -138,7 +138,7 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
     let hourly = qualified(spec.schema, &spec.relation(Tier::Hourly));
     push(format!(
         "CREATE MATERIALIZED VIEW {hourly}\nWITH (timescaledb.continuous, timescaledb.materialized_only = false) AS\n\
-         SELECT time_bucket(INTERVAL '1 hour', {time}) AS bucket{counted}, count(*) AS events\n  FROM {table}\n GROUP BY bucket{counted}\nWITH NO DATA;",
+         SELECT time_bucket(INTERVAL '1 hour', {time}) AS bucket{counted}, count(*) AS events\n  FROM {table}\n GROUP BY 1{counted}\nWITH NO DATA;",
     ));
     let daily = qualified(spec.schema, &spec.relation(Tier::Daily));
     push(format!(
@@ -160,7 +160,7 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         let daily_top = qualified(spec.schema, &spec.relation(Tier::DailyTop));
         push(format!(
             "CREATE MATERIALIZED VIEW {daily_top}\nWITH (timescaledb.continuous, timescaledb.materialized_only = false) AS\n\
-             SELECT time_bucket(INTERVAL '1 day', {time}) AS bucket{per_top},\n       count(*) AS events, min({time}) AS first_at, max({time}) AS last_at\n  FROM {table}\n GROUP BY bucket{per_top}\nWITH NO DATA;",
+             SELECT time_bucket(INTERVAL '1 day', {time}) AS bucket{per_top},\n       count(*) AS events, min({time}) AS first_at, max({time}) AS last_at\n  FROM {table}\n GROUP BY 1{per_top}\nWITH NO DATA;",
         ));
         policies.push(format!(
             "SELECT add_continuous_aggregate_policy({}, start_offset => NULL, end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes');",
