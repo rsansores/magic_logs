@@ -44,7 +44,15 @@ And [`magic_logs_explorer`](https://github.com/rsansores/magic_logs/tree/main/ex
 the window, the facets, the histogram's geometry and its brush, the pages
 — state in your URL, drawn by your own components.
 
-![The explorer's demo: a day of a fleet's events, an incident in the harbor](https://raw.githubusercontent.com/rsansores/magic_logs/main/explorer/images/explorer.png)
+![The explorer's demo: a day of a fleet's events, an incident in the harbor](https://github.com/rsansores/magic_logs/raw/main/explorer/images/explorer.png)
+
+Brushed to the incident and narrowed to errors, grouped by truck:
+
+![The same, brushed to the incident and narrowed to errors, grouped by truck](https://github.com/rsansores/magic_logs/raw/main/explorer/images/explorer-zoomed.png)
+
+Every pixel above is the demo's own markup and stylesheet
+([`explorer/demo`](https://github.com/rsansores/magic_logs/tree/main/explorer/demo/)): the package draws
+nothing, so it looks like whatever your design system makes of it.
 
 ## Requirements
 

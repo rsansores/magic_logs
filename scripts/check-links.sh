@@ -10,7 +10,7 @@ root=$PWD
 
 repo=https://github.com/rsansores/magic_logs
 lychee --offline --include-fragments --no-progress \
-  --remap "^$repo/(blob|tree|edit)/main/(.*)$ file://$root/\$2" \
+  --remap "^$repo/(blob|tree|edit|raw)/main/(.*)$ file://$root/\$2" \
   --remap "^https://raw\.githubusercontent\.com/rsansores/magic_logs/main/(.*)$ file://$root/\$1" \
   --remap "^$repo/?$ file://$root/" \
   --exclude '^https?://' \

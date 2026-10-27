@@ -5,9 +5,9 @@ Vue 3, without its looks: a window of time, facets with counts, a histogram
 that zooms by brushing, the rows newest first and grouped counts. It holds
 the state and works out the geometry; your components draw it.
 
-![The demo: a day of a fleet's events, an incident in the harbor](https://raw.githubusercontent.com/rsansores/magic_logs/main/explorer/images/explorer.png)
+![The demo: a day of a fleet's events, an incident in the harbor](https://github.com/rsansores/magic_logs/raw/main/explorer/images/explorer.png)
 
-![The same, brushed to the incident and narrowed to errors, grouped by truck](https://raw.githubusercontent.com/rsansores/magic_logs/main/explorer/images/explorer-zoomed.png)
+![The same, brushed to the incident and narrowed to errors, grouped by truck](https://github.com/rsansores/magic_logs/raw/main/explorer/images/explorer-zoomed.png)
 
 The pictures are of the demo in this directory (`pnpm dev`): made-up data,
 and every pixel drawn by the demo's own markup and stylesheet. The package
