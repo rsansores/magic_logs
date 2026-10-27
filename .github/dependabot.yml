@@ -1,0 +1,35 @@
+# The actions are pinned to commits, and the lockfiles to versions; this moves
+# both to the releases.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+  # The dependencies themselves: the workspace, and the example with a
+  # lockfile of its own.
+  - package-ecosystem: cargo
+    directories:
+      - /
+      - /examples/fleet
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    # Every question is a sqlx QueryBuilder and every instant a chrono
+    # DateTime: a new major release of either is a breaking release of the
+    # crate, made on purpose, not a bump.
+    ignore:
+      - dependency-name: sqlx
+        versions: [">= 0.9"]
+      - dependency-name: chrono
+        versions: [">= 0.5"]
+  - package-ecosystem: npm
+    directories:
+      - /explorer
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

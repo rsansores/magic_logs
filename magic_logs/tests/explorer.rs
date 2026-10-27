@@ -10,7 +10,6 @@ use magic_logs::{
 use sqlx::PgPool;
 use uuid::Uuid;
 
-#[allow(dead_code)]
 #[derive(MagicLog, sqlx::FromRow, Debug, Clone)]
 #[log(
     name = "events",
@@ -231,6 +230,15 @@ async fn a_page_follows_its_cursor_newest_first(pool: PgPool) {
         .iter()
         .chain(&second)
         .all(|e| e.kind == "power" && e.operator.as_deref() == Some("ana")));
+    // A page is the whole row, every column as the table holds it.
+    let zones = [Uuid::from_u128(1), Uuid::from_u128(2)];
+    assert!(first.iter().all(|e| e.tenant_id == TENANT
+        && zones.contains(&e.zone_id)
+        && e.unit_id
+            .to_string()
+            .starts_with("00000000-0000-0000-0000-0000000000a")
+        && matches!(e.level, Level::Info | Level::Warning | Level::Error)
+        && e.description.starts_with("unit ")));
 
     let found: Vec<Event> = page(&spec, &window(4).search("HOLA"), None, 1000)
         .unwrap()

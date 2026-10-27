@@ -6,7 +6,6 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use magic_logs::{facets, grouped, histogram, migration, page, Cursor, Filter, Governed, MagicLog};
 use uuid::Uuid;
 
-#[allow(dead_code)]
 #[derive(MagicLog)]
 #[log(
     name = "events",
@@ -34,6 +33,22 @@ struct Event {
     operator_id: Option<Uuid>,
     #[log(search)]
     description: String,
+}
+
+/// The row's columns, as a page reads them: the table the golden files
+/// are written for has every kind of column.
+fn columns(e: Event) -> impl std::fmt::Debug {
+    (
+        e.id,
+        e.at,
+        e.tenant_id,
+        e.zone_id,
+        e.severity,
+        e.kind,
+        e.unit_id,
+        e.operator_id,
+        e.description,
+    )
 }
 
 /// A host's governance: a view narrowed by the reader's zones.
@@ -172,6 +187,7 @@ fn golden(file: &str, made: &str) {
 
 #[test]
 fn the_migration_is_the_one_checked_in() {
+    let _ = columns;
     golden("migration.sql", &migration(&Event::SPEC, govern));
 }
 

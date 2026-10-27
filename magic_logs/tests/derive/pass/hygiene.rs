@@ -18,13 +18,12 @@ pub struct Event {
     pub level: ::std::string::String,
 }
 
-#[allow(dead_code)]
+// Names the derive's code must not mean.
 struct Option;
-#[allow(dead_code)]
 struct Some;
-#[allow(dead_code)]
 struct None;
 
 fn main() {
+    let _ = (Option, Some, None);
     let _ = <Event as ::magic_logs::MagicLog>::SPEC;
 }
