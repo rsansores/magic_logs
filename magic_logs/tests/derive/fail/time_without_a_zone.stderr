@@ -1,0 +1,5 @@
+error: the time is an instant, `timestamptz` (a `DateTime<Utc>`): `timestamp` is not one
+  --> tests/derive/fail/time_without_a_zone.rs:10:9
+   |
+10 |     pub at: NaiveDateTime,
+   |         ^^

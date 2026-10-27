@@ -172,6 +172,10 @@ pub magic_logs::Governed::schema: &'a str
 pub magic_logs::Governed::scope: core::option::Option<&'a str>
 pub magic_logs::Governed::view: &'a str
 pub magic_logs::Governed::view_schema: &'a str
+impl magic_logs::Governed<'_>
+pub fn magic_logs::Governed<'_>::quoted_relation(&self) -> alloc::string::String
+pub fn magic_logs::Governed<'_>::quoted_scope(&self) -> core::option::Option<alloc::string::String>
+pub fn magic_logs::Governed<'_>::quoted_view(&self) -> alloc::string::String
 impl<'a> core::clone::Clone for magic_logs::Governed<'a>
 pub fn magic_logs::Governed<'a>::clone(&self) -> Self
 impl<'a> core::fmt::Debug for magic_logs::Governed<'a>

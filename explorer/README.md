@@ -134,6 +134,13 @@ How it behaves:
   asks as soon as it is called: on a server render, call them on the
   client (`onMounted`, or a client-only component), or the markup the
   server sends and the client's will differ.
+- **A bar is a whole bucket.** The counts count the bucket a window
+  begins in whole, so the plot begins where that bucket does
+  (`geometry.range`), and every bar is as wide as its step. Label the axis
+  and brush on `geometry.range`, not on the window asked.
+- **One key, one thing.** A field stored under `window`, `from`, `to`, `q`
+  or `live` — or two fields under one key — is refused when the explorer
+  is made: give it a `key` of its own.
 - **Time is UTC.** Buckets begin where TimescaleDB's `time_bucket` begins
   them, on UTC boundaries, and so do the round instants `geometry` ticks
   at: format the axis in UTC, or a day's label falls on the day before west

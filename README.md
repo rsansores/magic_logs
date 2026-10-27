@@ -170,14 +170,12 @@ use magic_logs::Governed;
 
 /// Every relation readable through a view that keeps the reader's zones.
 fn govern(g: &Governed) -> String {
-    let scope = g.scope.unwrap_or("zone");
+    let scope = g.quoted_scope().unwrap_or_else(|| "zone".to_owned());
     format!(
-        "CREATE VIEW {vs}.{v} AS SELECT * FROM {s}.{r} \
+        "CREATE VIEW {} AS SELECT * FROM {} \
           WHERE {scope} = ANY((SELECT string_to_array(current_setting('app.zones', true), ','))::text[]);",
-        vs = g.view_schema,
-        v = g.view,
-        s = g.schema,
-        r = g.relation,
+        g.quoted_view(),
+        g.quoted_relation(),
     )
 }
 ```

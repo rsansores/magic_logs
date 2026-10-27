@@ -53,7 +53,8 @@ export function useHistogram(
   )
   const brush = shallowRef<{ a: number; b: number } | null>(null)
 
-  const span = (a: number, b: number): Range => selection(on.value.range, a, b, on.value.step.ms)
+  // The brush is on the plot, which begins at its first whole bucket.
+  const span = (a: number, b: number): Range => selection(drawn.value.range, a, b, on.value.step.ms)
   const at = (event: PointerEvent) => {
     const box = (event.currentTarget as Element).getBoundingClientRect()
     return box.width ? (event.clientX - box.left) / box.width : 0
@@ -62,8 +63,8 @@ export function useHistogram(
   const brushed = computed(() => {
     if (!brush.value) return null
     const { from, to } = span(brush.value.a, brush.value.b)
-    const start = on.value.range.from.getTime()
-    const width = on.value.range.to.getTime() - start
+    const start = drawn.value.range.from.getTime()
+    const width = drawn.value.range.to.getTime() - start
     const x = Math.max((from.getTime() - start) / width, 0)
     return { x, width: Math.min((to.getTime() - start) / width, 1) - x }
   })

@@ -30,8 +30,9 @@
 //! // each relation readable through a view (here, by everyone).
 //! let sql = magic_logs::migration(&Event::SPEC, |g: &Governed| {
 //!     format!(
-//!         "CREATE VIEW {}.{} AS SELECT * FROM {}.{};",
-//!         g.view_schema, g.view, g.schema, g.relation
+//!         "CREATE VIEW {} AS SELECT * FROM {};",
+//!         g.quoted_view(),
+//!         g.quoted_relation()
 //!     )
 //! });
 //! sqlx::raw_sql(&sql).execute(&pool).await?;
@@ -99,8 +100,9 @@ pub enum Error {
     /// A filter searches a table with no `#[log(search)]` column.
     #[error("the table searches no column")]
     NothingSearched,
-    /// A histogram's step is zero, or less.
-    #[error("the step is not positive")]
+    /// A histogram's step is shorter than a microsecond, or not whole
+    /// microseconds.
+    #[error("the step is not a whole number of microseconds, at least one")]
     Step,
     /// A page or a grouping asked for fewer than no rows.
     #[error("the limit is negative")]

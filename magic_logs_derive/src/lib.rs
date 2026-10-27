@@ -10,13 +10,10 @@ use syn::{ext::IdentExt, parse_macro_input, Data, DeriveInput, Fields, LitStr, T
 /// may be named.
 const COUNTS_OWN: [&str; 4] = ["bucket", "events", "first_at", "last_at"];
 
-/// The SQL types a hypertable's time may have, as `sql` names them.
-const TIMES: [&str; 4] = [
-    "timestamptz",
-    "timestamp with time zone",
-    "timestamp",
-    "timestamp without time zone",
-];
+/// The SQL types the time may have, as `sql` names them: an instant. A
+/// `timestamp` without a zone would be compared, and bucketed, in the
+/// session's time zone.
+const TIMES: [&str; 2] = ["timestamptz", "timestamp with time zone"];
 
 /// The longest identifier PostgreSQL keeps whole.
 const LONGEST: usize = 63;
@@ -258,11 +255,17 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     };
     let time = one(|f| f.time, "time", true)?.expect("required");
     let id = one(|f| f.id, "id", true)?.expect("required");
+    if id.name == time.name {
+        return Err(syn::Error::new(
+            id.at,
+            "the id breaks ties between rows of one time: it is another column",
+        ));
+    }
     if !TIMES.contains(&time.sql.as_str()) {
         return Err(syn::Error::new(
             time.at,
             format!(
-                "the time is a timestamp: `{}` is not one (a `DateTime<Utc>`, or `sql = \"timestamptz\"`)",
+                "the time is an instant, `timestamptz` (a `DateTime<Utc>`): `{}` is not one",
                 time.sql
             ),
         ));

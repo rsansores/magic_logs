@@ -99,16 +99,29 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     serialize: (v) => v,
   }
 
+  const specs: Record<string, FieldOptions> = Array.isArray(options.fields)
+    ? Object.fromEntries((options.fields as readonly F[]).map((f) => [f, {}]))
+    : (options.fields as Record<F, FieldOptions>)
+  const fieldNames = Object.keys(specs) as F[]
+  // Two pieces under one key would write over each other in the store.
+  const keys = [
+    key('window', 'window'),
+    key('from', 'from'),
+    key('to', 'to'),
+    key('search', 'q'),
+    key('live', 'live'),
+    ...fieldNames.map((f) => specs[f]!.key ?? f),
+  ]
+  const twice = keys.find((k, i) => keys.indexOf(k) !== i)
+  if (twice !== undefined)
+    throw new Error(`the explorer keeps two things under "${twice}": give one a \`key\` of its own`)
+
   const preset = store(key('window', 'window'), initial, presetCodec)
   const from = store(key('from', 'from'), '', instant)
   const to = store(key('to', 'to'), '', instant)
   const search = store(key('search', 'q'), '', text)
   const live = store(key('live', 'live'), false, flag)
 
-  const specs: Record<string, FieldOptions> = Array.isArray(options.fields)
-    ? Object.fromEntries((options.fields as readonly F[]).map((f) => [f, {}]))
-    : (options.fields as Record<F, FieldOptions>)
-  const fieldNames = Object.keys(specs) as F[]
   const fields = Object.fromEntries(
     fieldNames.map((f) => [f, store<string[]>(specs[f]!.key ?? f, [], listOf(specs[f]!.accept))]),
   ) as Record<F, Ref<string[]>>
@@ -134,16 +147,21 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   // Each of these changes only when its value does: a write to the store
   // that leaves the question as it was asks nothing again.
   // A custom window the store holds that does not read — no instants,
-  // backwards, too long — is the window shown first, said so.
+  // backwards, too long — is the window shown first, said so: on load, and
+  // whenever the store moves (the back button, a router).
   const longest = options.longest ?? LONGEST
-  if (preset.value === 'custom') {
-    const span = Date.parse(to.value) - Date.parse(from.value)
-    if (!(span > 0 && span <= longest)) {
+  watch(
+    [preset, from, to],
+    () => {
+      if (preset.value !== 'custom') return
+      const span = Date.parse(to.value) - Date.parse(from.value)
+      if (span > 0 && span <= longest) return
       preset.value = initial
       from.value = ''
       to.value = ''
-    }
-  }
+    },
+    { immediate: true, flush: 'sync' },
+  )
 
   const range = computed<Range>((before) => {
     const next = rangeOf(

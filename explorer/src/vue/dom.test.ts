@@ -307,6 +307,88 @@ describe('useLogFetch, round the edges', () => {
   })
 })
 
+describe('useLogFetch while a slide waits', () => {
+  function live() {
+    return scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(0)
+      // The histogram is slow; the first page lands at once.
+      c.fetchers.histogram = (_q, step) => {
+        c.asked.histogram++
+        return new Promise((r) =>
+          setTimeout(() => r([{ bucket: new Date(now).toISOString(), level: step.name, count: 1 }]), 2_500),
+        )
+      }
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+  }
+
+  it('reads no page after the pages before the slide, and starts them again after', async () => {
+    const { value, scope } = live()
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(10)
+    expect(value.answers.next.value).toBe('c1')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(value.answers.next.value).toBeNull()
+    value.e.more('c1')
+    expect(value.e.live.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(value.answers.rows.value.map((r) => r.id)).toEqual(['first'])
+    expect(value.e.cursors.value).toEqual([undefined])
+    value.e.more(value.answers.next.value)
+    await vi.runAllTimersAsync()
+    expect(value.answers.rows.value.map((r) => r.id)).toEqual(['first', 'c1'])
+    scope.stop()
+  })
+
+  it('asks a refresh once, not again when the waiting answers land', async () => {
+    const { value, scope } = live()
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(1_100)
+    value.e.live.value = false
+    value.e.refresh()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(value.c.asked.histogram).toBe(2)
+    scope.stop()
+  })
+
+  it('does not wait on an answer aborted whose fetcher ignores its signal', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(0)
+      let first = true
+      c.fetchers.histogram = () => {
+        c.asked.histogram++
+        // The first answer never comes, whatever its signal says.
+        if (first) return ((first = false), new Promise(() => {}))
+        return Promise.resolve([])
+      }
+      return { e, c, answers: useLogFetch(e, c.fetchers) }
+    })
+    value.e.live.value = true
+    value.e.toggle('kind', 'door')
+    await vi.advanceTimersByTimeAsync(3_100)
+    expect(value.c.asked.histogram).toBeGreaterThanOrEqual(4)
+    scope.stop()
+  })
+})
+
+describe('useLogExplorer keys', () => {
+  it('refuses two things under one key', () => {
+    expect(() => scoped(() => useLogExplorer({ fields: ['to'] }))).toThrow(/two things under "to"/)
+    expect(() => scoped(() => useLogExplorer({ fields: { to: { key: 'until' } } }))).not.toThrow()
+  })
+
+  it('reads a custom window the back button lands on without instants as the default', async () => {
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], store: urlStore() }))
+    at('/?window=custom')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await nextTick()
+    expect(e.preset.value).toBe('24h')
+    scope.stop()
+  })
+})
+
 describe('a window at its bounds', () => {
   it('keeps a brush past the longest window to the longest, ending where it ends', () => {
     const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], longest: 10 * HOUR }))

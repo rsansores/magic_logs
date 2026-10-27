@@ -1,0 +1,13 @@
+error: the id breaks ties between rows of one time: it is another column
+ --> tests/derive/fail/id_is_the_time.rs:8:9
+  |
+8 |     pub at: DateTime<Utc>,
+  |         ^^
+
+warning: unused import: `NaiveDateTime`
+ --> tests/derive/fail/id_is_the_time.rs:1:24
+  |
+1 | use chrono::{DateTime, NaiveDateTime, Utc};
+  |                        ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

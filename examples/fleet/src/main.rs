@@ -57,15 +57,15 @@ const FIELDS: [&str; 4] = ["level", "kind", "zone", "unit"];
 /// see: every zone for `*`, none when `fleet.zones` is not set. The setting
 /// is read in a scalar subquery, once per query rather than once per row.
 fn govern(g: &Governed) -> String {
-    let scope = g.scope.expect("the fleet's events are scoped by zone");
+    let scope = g
+        .quoted_scope()
+        .expect("the fleet's events are scoped by zone");
     format!(
-        "CREATE VIEW \"{vs}\".\"{v}\" AS SELECT * FROM \"{s}\".\"{r}\" \
+        "CREATE VIEW {} AS SELECT * FROM {} \
           WHERE (SELECT current_setting('fleet.zones', true)) = '*' \
-             OR \"{scope}\" = ANY((SELECT string_to_array(current_setting('fleet.zones', true), ','))::text[]);",
-        vs = g.view_schema,
-        v = g.view,
-        s = g.schema,
-        r = g.relation,
+             OR {scope} = ANY((SELECT string_to_array(current_setting('fleet.zones', true), ','))::text[]);",
+        g.quoted_view(),
+        g.quoted_relation(),
     )
 }
 

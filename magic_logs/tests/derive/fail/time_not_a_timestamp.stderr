@@ -1,4 +1,4 @@
-error: the time is a timestamp: `bigint` is not one (a `DateTime<Utc>`, or `sql = "timestamptz"`)
+error: the time is an instant, `timestamptz` (a `DateTime<Utc>`): `bigint` is not one
   --> tests/derive/fail/time_not_a_timestamp.rs:10:9
    |
 10 |     pub at: i64,

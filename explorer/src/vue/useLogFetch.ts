@@ -87,6 +87,8 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
     if (!fetch) return
     const { signal } = asked
     loading.value[which] = true
+    // Only what the question asked now waits on: an answer aborted, whose
+    // fetcher ignores its signal, holds nothing up.
     inFlight++
     try {
       const answer = await fetch(signal)
@@ -100,8 +102,10 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
         failed?.()
       }
     } finally {
-      inFlight--
-      if (!signal.aborted) loading.value[which] = false
+      if (!signal.aborted) {
+        inFlight--
+        loading.value[which] = false
+      }
       if (inFlight === 0 && again && !disposed) {
         again = false
         askAll()
@@ -111,8 +115,12 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
 
   function askAll() {
     if (disposed) return
+    again = false
+    inFlight = 0
     asked.abort()
     asked = new AbortController()
+    // The pages start again from the newest, whatever was read meanwhile.
+    if (explorer.cursors.value.length > 1) explorer.cursors.value = [undefined]
     errors.value = { histogram: null, facets: null, rows: null, groups: null }
     loading.value = { histogram: false, facets: false, rows: false, groups: false }
     const question = explorer.question.value
@@ -151,8 +159,12 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
       // reader changed is asked at once.
       const slid =
         explorer.live.value && askedNow === askedBefore && before !== undefined && slide(before, question)
-      if (slid && inFlight > 0) again = true
-      else askAll()
+      if (slid && inFlight > 0) {
+        // The pages on screen answer the window before the slide: none is
+        // read after them until the slid question's first page lands.
+        again = true
+        current.value = ++asking
+      } else askAll()
     },
     { immediate: true },
   )

@@ -19,7 +19,9 @@ fn literal(text: &str) -> String {
 }
 
 /// A relation the host makes readable: `view` in `view_schema`, over
-/// `relation` in `schema`, narrowed by `scope` when there is one.
+/// `relation` in `schema`, narrowed by `scope` when there is one. The names
+/// are as the table spells them, unquoted; the `quoted_` methods give them
+/// as SQL must write them.
 #[derive(Debug, Clone, Copy)]
 pub struct Governed<'a> {
     /// The schema the view is made in: [`Spec::view_schema`](crate::Spec::view_schema).
@@ -32,6 +34,23 @@ pub struct Governed<'a> {
     pub relation: &'a str,
     /// The column a reader is narrowed by, kept in every relation.
     pub scope: Option<&'a str>,
+}
+
+impl Governed<'_> {
+    /// The view, schema-qualified and quoted: what `CREATE VIEW` names.
+    pub fn quoted_view(&self) -> String {
+        qualified(self.view_schema, self.view)
+    }
+
+    /// The relation the view reads, schema-qualified and quoted.
+    pub fn quoted_relation(&self) -> String {
+        qualified(self.schema, self.relation)
+    }
+
+    /// The scope column, quoted.
+    pub fn quoted_scope(&self) -> Option<String> {
+        self.scope.map(ident)
+    }
 }
 
 /// The migration for `spec`'s table, which already exists in its schema

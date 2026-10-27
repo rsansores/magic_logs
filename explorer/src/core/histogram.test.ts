@@ -60,10 +60,13 @@ describe('geometry', () => {
     expect(g.counts).toEqual([{ value: 0, at: 0 }])
   })
 
-  it('clips a bucket that begins before the window to the plot', () => {
+  it('begins the plot at the first whole bucket, as the counts count it', () => {
     const g = geometry([], { from: new Date(at(0) + HOUR / 2), to: new Date(at(2)) }, HOUR)
-    expect(g.bars[0]!.x).toBe(0)
-    expect(g.bars[0]!.width).toBeCloseTo(1 / 3)
+    expect(g.range.from.getTime()).toBe(at(0))
+    expect(g.bars.map((b) => [b.x, b.width])).toEqual([
+      [0, 0.5],
+      [0.5, 0.5],
+    ])
   })
 })
 

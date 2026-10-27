@@ -57,8 +57,9 @@ fn day() -> DateTime<Utc> {
 /// No authorization: every relation read as it is.
 fn plain(g: &Governed) -> String {
     format!(
-        "CREATE VIEW \"{}\".\"{}\" AS SELECT * FROM \"{}\".\"{}\";",
-        g.view_schema, g.view, g.schema, g.relation
+        "CREATE VIEW {} AS SELECT * FROM {};",
+        g.quoted_view(),
+        g.quoted_relation()
     )
 }
 
@@ -70,14 +71,12 @@ async fn setup(pool: &PgPool) {
 /// session names one: the scope narrowing every tier alike.
 fn zoned(g: &Governed) -> String {
     format!(
-        "CREATE VIEW \"{vs}\".\"{v}\" AS SELECT * FROM \"{s}\".\"{r}\" \
+        "CREATE VIEW {} AS SELECT * FROM {} \
           WHERE (SELECT coalesce(current_setting('test.zone', true), '')) = '' \
-             OR \"{scope}\" = (SELECT current_setting('test.zone', true))::uuid;",
-        vs = g.view_schema,
-        v = g.view,
-        s = g.schema,
-        r = g.relation,
-        scope = g.scope.unwrap(),
+             OR {scope} = (SELECT current_setting('test.zone', true))::uuid;",
+        g.quoted_view(),
+        g.quoted_relation(),
+        scope = g.quoted_scope().unwrap(),
     )
 }
 
@@ -305,6 +304,17 @@ fn a_filter_is_held_to_the_table() {
     assert_eq!(tier(&window(1), Some(Duration::minutes(5))), Tier::Raw);
     assert_eq!(tier(&window(1), Some(Duration::minutes(90))), Tier::Raw);
     assert_eq!(tier(&window(1), Some(Duration::hours(1))), Tier::Hourly);
+    for step in [
+        Duration::zero(),
+        Duration::nanoseconds(1),
+        Duration::hours(1) + Duration::nanoseconds(1),
+    ] {
+        assert_eq!(
+            histogram(&spec, &window(1), step).err(),
+            Some(magic_logs::Error::Step),
+            "{step}"
+        );
+    }
     assert_eq!(
         tier(
             &window(1),
@@ -675,4 +685,58 @@ async fn a_short_window_counts_its_tops_from_the_rows(pool: PgPool) {
     assert!(groups
         .iter()
         .all(|g| g.first_at.unwrap() >= filter.from && g.last_at.unwrap() < filter.to));
+}
+
+#[sqlx::test(migrations = false)]
+async fn names_sql_must_quote_and_a_tenant_that_is_the_top_migrate(pool: PgPool) {
+    #[derive(MagicLog)]
+    #[log(name = "Events", schema = "Private", view_schema = "Api")]
+    struct Reading {
+        #[log(id)]
+        id: i64,
+        #[log(time)]
+        at: DateTime<Utc>,
+        #[log(tenant, top)]
+        unit_id: i64,
+        #[log(facet, per_top)]
+        kind: String,
+    }
+    let _ = |r: Reading| (r.id, r.at, r.unit_id, r.kind);
+    sqlx::raw_sql(
+        "CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE SCHEMA \"Private\"; CREATE SCHEMA \"Api\"; \
+         CREATE TABLE \"Private\".\"Events\" (id bigint NOT NULL, at timestamptz NOT NULL, \
+             unit_id bigint NOT NULL, kind text NOT NULL, PRIMARY KEY (id, at)); \
+         INSERT INTO \"Private\".\"Events\" \
+           SELECT n, '2026-10-01'::timestamptz + n * interval '10 minutes', n % 3, 'k' || n % 2 \
+           FROM generate_series(1, 600) n;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(&migration(&Reading::SPEC, plain))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let filter = Filter::new(day(), day() + Duration::days(5));
+    let counts: Vec<FacetCount> = facets(&Reading::SPEC, &filter, &["unit_id", "kind"])
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let total = |field: &str| -> i64 {
+        counts
+            .iter()
+            .filter(|c| c.field == field)
+            .map(|c| c.count)
+            .sum()
+    };
+    assert_eq!((total("unit_id"), total("kind")), (600, 600));
+    let groups: Vec<Group> = grouped(&Reading::SPEC, &filter, "kind", 10)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(groups.iter().map(|g| g.count).sum::<i64>(), 600);
 }

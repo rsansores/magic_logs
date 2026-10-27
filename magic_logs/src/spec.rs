@@ -126,7 +126,9 @@ impl Spec {
     pub fn counted_per_top(&self) -> Vec<&'static str> {
         let mut out: Vec<&'static str> = self.tenant.into_iter().collect();
         if let Some(top) = self.top {
-            out.push(top.name);
+            if !out.contains(&top.name) {
+                out.push(top.name);
+            }
         }
         for f in self.fields.iter().filter(|f| f.per_top) {
             if !out.contains(&f.column.name) {

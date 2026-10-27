@@ -69,10 +69,16 @@ const total = computed(() =>
 const chosen = computed(() =>
   explorer.fieldNames.flatMap((field) => explorer.fields[field].value.map((value) => ({ field, value }))),
 )
-const tickLabel = (at: number) => {
-  const span = explorer.range.value.to.getTime() - explorer.range.value.from.getTime()
-  return span > 2 * 86_400_000 ? day.format(at) : time.format(at)
-}
+// Labels for the plot drawn, which may still be the last answer's.
+const tickLabel = (at: number, plot: { from: Date; to: Date }) =>
+  plot.to.getTime() - plot.from.getTime() > 2 * 86_400_000 ? day.format(at) : time.format(at)
+// A facet's largest values, and every chosen one however small.
+const shown = <T extends { chosen: boolean }>(items: T[], most: number) =>
+  items.filter((i, n) => n < most || i.chosen)
+const failure = computed(() => {
+  const e = answers.error.value
+  return e == null ? null : e instanceof Error ? e.message : String(e)
+})
 const busiest = (rows: { count: number }[]) => Math.max(1, ...rows.map((r) => r.count))
 const hovered = ref<number | null>(null)
 </script>
@@ -125,7 +131,7 @@ const hovered = ref<number | null>(null)
               <button v-if="facet.chosen.length" class="link" @click="facet.clear">clear</button>
             </h2>
             <ul>
-              <li v-for="item in facet.items.slice(0, field === 'unit' ? 8 : 10)" :key="item.value">
+              <li v-for="item in shown(facet.items, field === 'unit' ? 8 : 10)" :key="item.value">
                 <label
                   :class="{
                     chosen: item.chosen,
@@ -215,7 +221,7 @@ const hovered = ref<number | null>(null)
               </div>
               <div class="x">
                 <span v-for="tick in geometry.times" :key="tick.value" :style="{ left: `${tick.at * 100}%` }">
-                  {{ tickLabel(tick.value) }}
+                  {{ tickLabel(tick.value, geometry.range) }}
                 </span>
               </div>
             </div>
@@ -267,7 +273,10 @@ const hovered = ref<number | null>(null)
                   <td>{{ e.zone }}</td>
                   <td class="message">{{ e.message }}</td>
                 </tr>
-                <tr v-if="!rows.length && !loading">
+                <tr v-if="failure">
+                  <td colspan="6" class="empty">The events could not be read: {{ failure }}</td>
+                </tr>
+                <tr v-else-if="!rows.length && !loading">
                   <td colspan="6" class="empty">No events in this window</td>
                 </tr>
               </tbody>

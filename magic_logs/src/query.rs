@@ -323,7 +323,8 @@ pub fn histogram(
     step: Duration,
 ) -> Result<QueryBuilder<'static, Postgres>, Error> {
     filter.check(spec)?;
-    if step <= Duration::zero() {
+    // A step is whole microseconds, as PostgreSQL's intervals are.
+    if step < Duration::microseconds(1) || step.subsec_nanos() % 1_000 != 0 {
         return Err(Error::Step);
     }
     let tier = counts_tier(spec, filter, Some(step));

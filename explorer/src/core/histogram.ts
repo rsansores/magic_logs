@@ -60,8 +60,11 @@ export interface Geometry {
   max: number
   /** The scale's ticks, from 0 to `max`. */
   counts: Tick[]
-  /** Round instants across the window, a handful at most. */
+  /** Round instants across the plot, a handful at most. */
   times: Tick[]
+  /** What the plot spans: the window from the start of its first bucket,
+   * which the counts count whole. Fractions are of this; brush on it. */
+  range: Range
 }
 
 /** The geometry of `buckets` over `range`, stacked in the order of `levels`;
@@ -72,9 +75,13 @@ export function geometry(
   step: number,
   levels: readonly string[] = [],
 ): Geometry {
-  const from = range.from.getTime()
+  // The plot begins where the first bucket does: a bar is a whole bucket,
+  // as the counts count it, never one clipped to a window that began
+  // inside it.
+  const from = Math.floor(range.from.getTime() / step) * step
+  const plot = { from: new Date(from), to: range.to }
   const span = Math.max(range.to.getTime() - from, 1)
-  const filled = fill(buckets, range, step)
+  const filled = fill(buckets, plot, step)
   const totals = filled.map((b) => Object.values(b.counts).reduce((sum, n) => sum + n, 0))
   const max = niceMax(totals.reduce((m, t) => Math.max(m, t), 0))
   const clip = (v: number) => Math.min(Math.max(v, 0), 1)
@@ -104,7 +111,7 @@ export function geometry(
       segments,
     }
   })
-  return { bars, max, counts: countTicks(max), times: timeTicks(range) }
+  return { bars, max, counts: countTicks(max), times: timeTicks(plot), range: plot }
 }
 
 /** `n` rounded up to 1, 2 or 5 × 10ⁿ; 0 stays 0. */
