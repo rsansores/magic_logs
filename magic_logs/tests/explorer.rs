@@ -36,6 +36,8 @@ struct Event {
     unit_id: Uuid,
     #[log(filter)]
     operator: Option<String>,
+    #[log(filter)]
+    seen_at: Option<DateTime<Utc>>,
     #[log(search)]
     description: String,
 }
@@ -101,7 +103,7 @@ async fn setup_with(pool: &PgPool, govern: fn(&Governed) -> String) {
          CREATE SCHEMA private; \
          CREATE TABLE private.events (id uuid NOT NULL, at timestamptz NOT NULL, tenant_id uuid NOT NULL, \
              zone_id uuid NOT NULL, level level NOT NULL, kind text NOT NULL, unit_id uuid NOT NULL, \
-             operator text, description text NOT NULL, PRIMARY KEY (id, at));",
+             operator text, description text NOT NULL, seen_at timestamptz, PRIMARY KEY (id, at));",
     )
     .execute(pool)
     .await
@@ -119,7 +121,8 @@ async fn setup_with(pool: &PgPool, govern: fn(&Governed) -> String) {
                 (ARRAY['door','door','door','power','gps'])[1 + (n * 7 + u) % 5], \
                 ('00000000-0000-0000-0000-0000000000a' || u)::uuid, \
                 CASE WHEN n % 3 = 0 THEN 'ana' END, \
-                'unit ' || u || ' said ' || CASE WHEN n % 10 = 0 THEN 'hola mundo' ELSE 'ok' END \
+                'unit ' || u || ' said ' || CASE WHEN n % 10 = 0 THEN 'hola mundo' ELSE 'ok' END, \
+                CASE WHEN n % 4 = 0 THEN '{start}'::timestamptz END \
            FROM generate_series(0, 4 * 144 - 1) n, generate_series(1, 3) u;",
         start = day().to_rfc3339()
     ))
@@ -264,7 +267,8 @@ async fn a_page_follows_its_cursor_newest_first(pool: PgPool) {
             .to_string()
             .starts_with("00000000-0000-0000-0000-0000000000a")
         && matches!(e.level, Level::Info | Level::Warning | Level::Error)
-        && e.description.starts_with("unit ")));
+        && e.description.starts_with("unit ")
+        && e.seen_at.is_none_or(|t| t == day())));
 
     let found: Vec<Event> = page(&spec, &window(4).search("HOLA"), None, 1000)
         .unwrap()
@@ -304,6 +308,10 @@ fn a_filter_is_held_to_the_table() {
     assert_eq!(tier(&window(1), Some(Duration::minutes(5))), Tier::Raw);
     assert_eq!(tier(&window(1), Some(Duration::minutes(90))), Tier::Raw);
     assert_eq!(tier(&window(1), Some(Duration::hours(1))), Tier::Hourly);
+    // The tenant is kept in every count, and filtered like a facet.
+    let tenant = window(1).with("tenant_id", [TENANT.to_string()]);
+    assert_eq!(tenant.check(&spec), Ok(()));
+    assert_eq!(tier(&tenant, Some(Duration::hours(1))), Tier::Hourly);
     for step in [
         Duration::zero(),
         Duration::nanoseconds(1),
@@ -557,6 +565,33 @@ async fn compressed_history_pages_and_counts_as_it_did(pool: PgPool) {
     let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
     assert_eq!(counted, counted_before);
     assert_eq!(counted, raw);
+
+    // A filter on a timestamp, over compressed chunks: the values' cast is
+    // a constant to TimescaleDB's vectorized filter.
+    let seen = window(4).with("seen_at", [day().to_rfc3339()]);
+    let rows: Vec<Event> = page(&spec, &seen, None, 10_000)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 144 * 3);
+    let bad = page(
+        &spec,
+        &window(4).with("seen_at", ["yesterday-ish"]),
+        None,
+        10,
+    )
+    .unwrap()
+    .build_query_as::<Event>()
+    .fetch_all(&pool)
+    .await
+    .unwrap_err();
+    let code = bad
+        .as_database_error()
+        .and_then(|e| e.code())
+        .unwrap_or_default();
+    assert!(code.starts_with("22"), "{code}: {bad}");
 }
 
 #[sqlx::test(migrations = false)]

@@ -63,9 +63,13 @@ const label = (s: string) => kindNames[s] ?? s
 
 // What the bars count: every filter applies (a facet's own count leaves
 // out its own field's filter).
-const total = computed(() =>
-  answers.buckets.value.reduce((n, b) => n + Object.values(b.counts).reduce((s, c) => s + c, 0), 0),
-)
+const stepNames: Record<string, string> = {
+  minute: 'minute',
+  fiveMinutes: 'five minutes',
+  hour: 'hour',
+  sixHours: 'six hours',
+  day: 'day',
+}
 const chosen = computed(() =>
   explorer.fieldNames.flatMap((field) => explorer.fields[field].value.map((value) => ({ field, value }))),
 )
@@ -153,20 +157,23 @@ const hovered = ref<number | null>(null)
 
       <main class="main">
         <section class="card chart">
-          <div class="chart-head">
-            <div>
-              <strong>{{ number.format(total) }}</strong> events
-              <span class="muted">
-                · {{ moment.format(explorer.range.value.from) }} –
-                {{ moment.format(explorer.range.value.to) }} UTC · by
-                {{ explorer.step.value.name.replace(/([A-Z])/g, ' $1').toLowerCase() }}
-              </span>
-            </div>
-            <ul class="legend">
-              <li v-for="level in levels" :key="level" :class="`lv-${level}`"><i />{{ level }}</li>
-            </ul>
-          </div>
           <LogHistogram :levels="levels" v-slot="{ geometry, brushed, handlers }">
+            <!-- What the bars drawn count, over the plot they are drawn on:
+                 from the start of the first bucket, which is counted whole. -->
+            <div class="chart-head">
+              <div>
+                <strong>{{ number.format(geometry.bars.reduce((n, b) => n + b.total, 0)) }}</strong> events
+                <span class="muted">
+                  · {{ moment.format(geometry.range.from) }} – {{ moment.format(geometry.range.to) }} UTC
+                  <template v-if="answers.bucketsAnswer.value">
+                    · by {{ stepNames[answers.bucketsAnswer.value.step.name] }}
+                  </template>
+                </span>
+              </div>
+              <ul class="legend">
+                <li v-for="level in levels" :key="level" :class="`lv-${level}`"><i />{{ level }}</li>
+              </ul>
+            </div>
             <div class="plot">
               <div class="y">
                 <span

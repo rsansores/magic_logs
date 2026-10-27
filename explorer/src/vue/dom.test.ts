@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { mount } from '@vue/test-utils'
-import { effectScope, nextTick, watch } from 'vue'
+import { effectScope, nextTick, shallowRef, watch } from 'vue'
+import type { Step } from '../core/window.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listOf, text } from '../core/codec.js'
 import FacetHost from './FacetHost.test.vue'
@@ -446,6 +447,64 @@ describe('round four', () => {
     expect(wrapper.find('.rows').text()).toBe('first,c1')
     expect(wrapper.find('button').exists()).toBe(false)
     wrapper.unmount()
+  })
+})
+
+describe('round five', () => {
+  it('shows a failure slower than a slide while live', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: ['kind'], liveEvery: 1_000 })
+      const c = counting(0)
+      c.fetchers.histogram = () =>
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1_500))
+      const answers = useLogFetch(e, c.fetchers)
+      const seen: unknown[] = []
+      watch(answers.errors, (errors) => seen.push(errors.histogram))
+      return { e, answers, seen }
+    })
+    value.e.live.value = true
+    await vi.advanceTimersByTimeAsync(6_000)
+    expect(value.seen.some((e) => e instanceof Error)).toBe(true)
+    expect(value.answers.errors.value.histogram).toBeInstanceOf(Error)
+    scope.stop()
+  })
+
+  it('freezes the window on screen when made custom, not instants left in the address', () => {
+    at('/?from=2020-01-01T00:00:00Z&to=2020-01-02T00:00:00Z')
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [], store: urlStore() }))
+    expect(window.location.search).toBe('')
+    e.choose('custom')
+    expect(e.question.value.to).toBe(new Date(now).toISOString())
+    scope.stop()
+  })
+
+  it('ignores a preset it does not have', () => {
+    const { value: e, scope } = scoped(() => useLogExplorer({ fields: [] }))
+    e.choose('2h')
+    expect(e.preset.value).toBe('24h')
+    scope.stop()
+  })
+
+  it('zooms by the plot a brush began on, whatever lands meanwhile', async () => {
+    const { value, scope } = scoped(() => {
+      const e = useLogExplorer({ fields: [] })
+      const answered = shallowRef<{ range: { from: Date; to: Date }; step: Step } | null>(null)
+      return { e, answered, h: useHistogram(e, [], undefined, answered) }
+    })
+    const plot = document.createElement('div')
+    plot.getBoundingClientRect = () => ({ left: 0, width: 240 }) as DOMRect
+    const event = (x: number) =>
+      ({ button: 0, pointerId: 1, clientX: x, currentTarget: plot }) as unknown as PointerEvent
+    value.h.handlers.onPointerdown(event(10))
+    value.answered.value = {
+      range: { from: new Date(now - 7 * 24 * HOUR), to: new Date(now) },
+      step: { name: 'sixHours', ms: 6 * HOUR },
+    }
+    value.h.handlers.onPointermove(event(30))
+    value.h.handlers.onPointerup(event(30))
+    expect(Date.parse(value.e.from.value)).toBe(now - 23 * HOUR)
+    expect(Date.parse(value.e.to.value)).toBe(now - 21 * HOUR)
+    scope.stop()
   })
 })
 

@@ -160,12 +160,22 @@ export function timeTicks(range: Range, most = 6): Tick[] {
 }
 
 /** The window a brush across `a` and `b` (fractions of the plot's width, in
- * either order) selects, widened to whole steps; at least one step. */
+ * either order) selects, widened to whole steps and at least one, ending
+ * no later than the window. */
 export function selection(range: Range, a: number, b: number, step: number): Range {
   const from = range.from.getTime()
   const span = range.to.getTime() - from
   const at = (f: number) => from + Math.min(Math.max(f, 0), 1) * span
-  const start = Math.floor(at(Math.min(a, b)) / step) * step
-  const end = Math.max(Math.ceil(at(Math.max(a, b)) / step) * step, start + step)
+  // Whole steps, but no further than the window: not into the future.
+  const end = Math.min(
+    Math.max(
+      Math.ceil(at(Math.max(a, b)) / step) * step,
+      Math.floor(at(Math.min(a, b)) / step) * step + step,
+    ),
+    range.to.getTime(),
+  )
+  // A press at the window's very end selects the bucket it ends in.
+  const first = Math.floor(at(Math.min(a, b)) / step) * step
+  const start = first < end ? first : Math.floor((end - 1) / step) * step
   return { from: new Date(start), to: new Date(end) }
 }

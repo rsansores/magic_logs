@@ -368,11 +368,18 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     };
     let fields = cols
         .iter()
-        .filter(|c| c.flags.facet || c.flags.filter || c.flags.level || c.flags.scope || c.flags.top)
+        .filter(|c| {
+            c.flags.facet
+                || c.flags.filter
+                || c.flags.level
+                || c.flags.scope
+                || c.flags.tenant
+                || c.flags.top
+        })
         .map(|c| {
             let col = column(c);
-            let counted = c.flags.facet || c.flags.level || c.flags.scope;
-            let per_top = c.flags.per_top || c.flags.level || c.flags.scope;
+            let counted = c.flags.facet || c.flags.level || c.flags.scope || c.flags.tenant;
+            let per_top = c.flags.per_top || c.flags.level || c.flags.scope || c.flags.tenant;
             let indexed = c.flags.indexed;
             quote!(#krate::Field { column: #col, counted: #counted, per_top: #per_top, indexed: #indexed })
         });

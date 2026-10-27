@@ -10,7 +10,7 @@ export interface FacetItem {
 
 /** The values of `field` among `facets`' rows, largest first; a chosen value
  * no row holds is listed with 0, so it can be unchosen. Rows without a
- * value are not listed: no filter names them. */
+ * value, or with an empty one, are not listed: no filter names them. */
 export function facetOf(
   rows: readonly FacetCountRow[],
   field: string,
@@ -18,7 +18,7 @@ export function facetOf(
 ): FacetItem[] {
   const counts = new Map<string, number>()
   for (const row of rows)
-    if (row.field === field && row.value != null)
+    if (row.field === field && row.value != null && row.value !== '')
       counts.set(row.value, (counts.get(row.value) ?? 0) + row.count)
   for (const value of chosen) if (!counts.has(value)) counts.set(value, 0)
   return [...counts]

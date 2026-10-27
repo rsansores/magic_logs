@@ -82,7 +82,8 @@ export interface LogExplorer<F extends string = string> {
   more(next: string | null | undefined): void
   /** The window becomes `range`, and stops being live. */
   zoom(range: Range): void
-  /** The window becomes a preset (or `custom`, keeping its two instants). */
+  /** The window becomes a preset (or `custom`, holding the window on
+   * screen); a name that is not a preset is ignored. */
   choose(preset: string): void
   /** Chooses or unchooses one value of `field`. */
   toggle(field: F, value: string): void
@@ -164,7 +165,16 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   // three pieces one at a time, and a half-written window is not one.
   let writing = false
   const normalize = () => {
-    if (writing || preset.value !== 'custom') return
+    if (writing) return
+    // A named window keeps no instants: a later `custom` takes the window
+    // on screen, not ones left in the address.
+    if (preset.value !== 'custom') {
+      if (from.value || to.value) {
+        from.value = ''
+        to.value = ''
+      }
+      return
+    }
     const span = Date.parse(to.value) - Date.parse(from.value)
     if (span > 0 && span <= longest) return
     preset.value = initial
@@ -248,6 +258,7 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
       live.value = false
     },
     choose(next) {
+      if (next !== 'custom' && !presetOf(presets, next)) return
       write(() => {
         if (next !== 'custom') {
           from.value = ''

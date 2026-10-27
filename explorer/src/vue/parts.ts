@@ -51,10 +51,12 @@ export function useHistogram(
   const drawn = computed(() =>
     geometry(toValue(buckets), on.value.range, on.value.step.ms, toValue(levels) ?? []),
   )
-  const brush = shallowRef<{ a: number; b: number } | null>(null)
+  // A brush is held to the plot it began on: an answer that lands while
+  // the pointer is down redraws the bars, not what the brush selects.
+  const brush = shallowRef<{ a: number; b: number; plot: Range; step: number } | null>(null)
 
-  // The brush is on the plot, which begins at its first whole bucket.
-  const span = (a: number, b: number): Range => selection(drawn.value.range, a, b, on.value.step.ms)
+  const span = (b: { a: number; b: number; plot: Range; step: number }): Range =>
+    selection(b.plot, b.a, b.b, b.step)
   const at = (event: PointerEvent) => {
     const box = (event.currentTarget as Element).getBoundingClientRect()
     return box.width ? (event.clientX - box.left) / box.width : 0
@@ -62,7 +64,7 @@ export function useHistogram(
 
   const brushed = computed(() => {
     if (!brush.value) return null
-    const { from, to } = span(brush.value.a, brush.value.b)
+    const { from, to } = span(brush.value)
     const start = drawn.value.range.from.getTime()
     const width = drawn.value.range.to.getTime() - start
     const x = Math.max((from.getTime() - start) / width, 0)
@@ -77,16 +79,16 @@ export function useHistogram(
         if (event.button !== 0) return
         ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
         const f = at(event)
-        brush.value = { a: f, b: f }
+        brush.value = { a: f, b: f, plot: drawn.value.range, step: on.value.step.ms }
       },
       onPointermove(event) {
         if (brush.value) brush.value = { ...brush.value, b: at(event) }
       },
       onPointerup() {
         if (!brush.value) return
-        const { a, b } = brush.value
+        const held = brush.value
         brush.value = null
-        toValue(explorer).zoom(span(a, b))
+        toValue(explorer).zoom(span(held))
       },
       onPointercancel() {
         brush.value = null

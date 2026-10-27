@@ -19,7 +19,8 @@ pub struct Filter {
     pub to: DateTime<Utc>,
     /// `(field, values)`: the row's value of `field` is one of `values`,
     /// written as SQL reads the field's type from text — the database casts
-    /// them, and refuses one that does not read (`22P02`). An empty list
+    /// them, and refuses one that does not read with a data exception
+    /// (SQLSTATE class `22`: `22P02`, `22003`, `22007`, …). An empty list
     /// leaves the field unfiltered. The rows without a value (`NULL`), which
     /// a facet counts as `None`, are not selectable.
     pub fields: Vec<(String, Vec<String>)>,
@@ -252,9 +253,13 @@ fn push_where(
         let Some(field) = spec.field(name) else {
             continue;
         };
-        qb.push(format!(" AND {} = ANY(", ident(name)));
+        // The values are cast once, in an InitPlan: a cast from text that is
+        // not immutable (to a timestamp) is no constant to TimescaleDB's
+        // filter on compressed chunks, which then refuses it.
+        let sql = field.column.sql;
+        qb.push(format!(" AND {} = ANY((SELECT ", ident(name)));
         qb.push_bind(values.clone());
-        qb.push(format!("::{}[])", field.column.sql));
+        qb.push(format!("::{sql}[])::{sql}[])"));
     }
     if let (Some(text), Tier::Raw) = (&filter.search, tier) {
         let wrap = |s: String| match spec.search_with {

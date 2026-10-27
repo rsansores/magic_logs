@@ -1,6 +1,7 @@
 -- The fleet's table, as a host would have it before magic_logs: the rows
 -- in a schema only the fleet's own work reads, a primary key holding the
 -- time (a hypertable's unique keys hold its time column).
+CREATE EXTENSION IF NOT EXISTS timescaledb;
 CREATE SCHEMA IF NOT EXISTS fleet;
 CREATE SCHEMA IF NOT EXISTS api;
 

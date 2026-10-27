@@ -55,6 +55,7 @@ fn main() {
     assert_eq!(
         fields,
         [
+            ("tenant_id", true, true, false),
             ("zone_id", true, true, false),
             ("severity", true, true, false),
             ("kind", true, true, true),

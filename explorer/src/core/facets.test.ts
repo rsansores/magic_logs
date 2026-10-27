@@ -6,10 +6,11 @@ describe('facetOf', () => {
     { field: 'kind', value: 'door', count: 3 },
     { field: 'kind', value: 'battery', count: 9 },
     { field: 'kind', value: null, count: 4 },
+    { field: 'kind', value: '', count: 2 },
     { field: 'zone', value: 'north', count: 12 },
   ]
 
-  it("lists one field's values, largest first, without the rows that hold none", () => {
+  it("lists one field's values, largest first, without the rows that hold none or an empty one", () => {
     expect(facetOf(rows, 'kind')).toEqual([
       { value: 'battery', count: 9, chosen: false },
       { value: 'door', count: 3, chosen: false },

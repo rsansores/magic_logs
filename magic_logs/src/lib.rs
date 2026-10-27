@@ -52,7 +52,7 @@
 //! # }
 //! ```
 //!
-//! [The README](https://github.com/rsansores/magic_logs#readme) lists the
+//! [The README](https://github.com/rsansores/magic_logs) lists the
 //! attributes; [how it works](https://github.com/rsansores/magic_logs/blob/main/HOW_IT_WORKS.md)
 //! goes through the tables, the tiers and what each question costs.
 //!

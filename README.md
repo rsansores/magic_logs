@@ -140,7 +140,7 @@ pub struct Reading {
 | struct | `search_with` | a function both sides of a search pass through (`f_unaccent`, `lower`) |
 | struct | `crate` | the path to magic_logs, when you re-export it |
 | field | `id`, `time` | the tie-breaker and the time (required) |
-| field | `tenant`, `scope` | kept in every count; `scope` is what your views narrow readers by |
+| field | `tenant`, `scope` | kept in every count, and filtered and counted like a `facet`; `scope` is what your views narrow readers by |
 | field | `level` | counted, and what the histogram is stacked by |
 | field | `facet` | counted by hour and by day; `per_top` also per day and `top`; `indexed` (of a `facet` or a `filter`) gets an index of its own |
 | field | `top` | the entity counted on its own, per day: the grouped view's rows |
@@ -237,8 +237,9 @@ limit — is an
 [`Error`](https://docs.rs/magic_logs/latest/magic_logs/enum.Error.html),
 before any SQL is written: answer it as the caller's mistake. A value is
 sent as text and cast by the database to the column's type: one that does
-not read (`not-a-uuid` for a `uuid`) is refused there, SQLSTATE `22P02`,
-which is the caller's mistake too. A search is text as typed: `%` and `_`
+not read (`not-a-uuid` for a `uuid`, a number out of range, a date that is
+not one) is refused there with a data exception, SQLSTATE class `22`
+(`22P02`, `22003`, `22007`, …), which is the caller's mistake too. A search is text as typed: `%` and `_`
 match themselves.
 
 With the `serde` feature, `Bucket`, `FacetCount` and `Group` serialize as

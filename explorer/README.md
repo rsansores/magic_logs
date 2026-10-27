@@ -140,7 +140,8 @@ How it behaves:
   server sends and the client's will differ.
 - **A bar is a whole bucket.** magic_logs' counts count the bucket a window
   begins in whole, so the plot begins where that bucket does
-  (`geometry.range`), and every bar is as wide as its step. Label the axis
+  (`geometry.range`), and every bar is as wide as its step but the last,
+  cut where the window ends — it counts only what came before. Label the axis
   and brush on `geometry.range`, not on the window asked. A question read
   from the rows (a search, a step under an hour, a field the counts do not
   keep) counts its first bucket from the window's start: that bar is drawn

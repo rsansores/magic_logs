@@ -116,7 +116,10 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
     }
   }
 
-  function askAll() {
+  /** Asks the four questions; `anew` when the reader changed the question,
+   * whose failures before are not this question's. A slide or a refresh
+   * keeps them, until each part is answered. */
+  function askAll(anew = false) {
     if (disposed) return
     again = false
     waitingSince = null
@@ -125,7 +128,7 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
     asked = new AbortController()
     // The pages start again from the newest, whatever was read meanwhile.
     if (explorer.cursors.value.length > 1) explorer.cursors.value = [undefined]
-    errors.value = { histogram: null, facets: null, rows: null, groups: null }
+    if (anew) errors.value = { histogram: null, facets: null, rows: null, groups: null }
     loading.value = { histogram: false, facets: false, rows: false, groups: false }
     const question = explorer.question.value
     const answered = { range: explorer.range.value, step: explorer.step.value }
@@ -175,7 +178,7 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
         again = true
         waitingSince ??= Date.now()
         current.value = ++asking
-      } else askAll()
+      } else askAll(!slid && askedNow === askedBefore)
     },
     { immediate: true },
   )

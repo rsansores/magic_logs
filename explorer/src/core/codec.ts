@@ -29,8 +29,13 @@ export const instant: Codec<string> = {
   parse: (raw) => {
     if (!RFC3339.test(raw)) return undefined
     const at = new Date(raw)
+    if (Number.isNaN(at.getTime())) return undefined
+    // A date that does not exist (February 30th) is not rolled into March.
+    const [y, m, d] = raw.slice(0, 10).split('-').map(Number)
+    const day = new Date(Date.UTC(y!, m! - 1, d!))
+    if (day.getUTCFullYear() !== y || day.getUTCMonth() !== m! - 1 || day.getUTCDate() !== d) return undefined
     const year = at.getUTCFullYear()
-    return Number.isNaN(at.getTime()) || year < 1 || year > 9999 ? undefined : at.toISOString()
+    return year < 1 || year > 9999 ? undefined : at.toISOString()
   },
   serialize: (value) => value,
 }
