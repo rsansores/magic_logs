@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 — unreleased
+## 0.1.1 — 2026-10-27
 
 - A search matches words: a row matches when every word of the search is
   in one of its searched columns, in any order (`"gate north"` finds

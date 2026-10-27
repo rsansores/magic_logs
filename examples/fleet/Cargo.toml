@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 # Outside this repository, leave `path` out.
-magic_logs = { version = "0.1.0", path = "../../magic_logs", features = ["serde"] }
+magic_logs = { version = "0.1.1", path = "../../magic_logs", features = ["serde"] }
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 serde = { version = "1", features = ["derive"] }

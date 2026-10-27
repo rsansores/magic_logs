@@ -14,7 +14,7 @@ documentation = "https://docs.rs/magic_logs"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-magic_logs_derive = { version = "=0.1.0", path = "../magic_logs_derive" }
+magic_logs_derive = { version = "=0.1.1", path = "../magic_logs_derive" }
 serde = { version = "1", features = ["derive"], optional = true }
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "chrono", "derive", "uuid"] }
 thiserror = "2"

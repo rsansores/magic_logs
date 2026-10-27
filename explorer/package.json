@@ -1,6 +1,6 @@
 {
   "name": "magic_logs_explorer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The magic_logs explorer for Vue 3, without its looks: a window of time, facets with counts, a histogram that zooms, the rows newest first and grouped counts — state in your URL, drawn by your design system.",
   "type": "module",
   "license": "MIT OR Apache-2.0",
