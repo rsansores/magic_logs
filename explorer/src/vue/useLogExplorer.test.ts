@@ -97,6 +97,13 @@ describe('useLogExplorer', () => {
     scope.stop()
   })
 
+  it('refuses a field that is also a range', () => {
+    vi.useFakeTimers({ now })
+    expect(() => useLogExplorer({ fields: ['kind'], ranges: ['kind'], store: recordStore({}) })).toThrow(
+      '"kind" is a field and a range',
+    )
+  })
+
   it('refuses a range kept under a key a field has', () => {
     vi.useFakeTimers({ now })
     expect(() =>

@@ -1471,3 +1471,126 @@ async fn drift_names_every_count_a_narrower_declaration_does_not_make(pool: PgPo
         assert_eq!(named, expected);
     }
 }
+
+/// A column of each common type with an index of its own, nothing declared:
+/// what TimescaleDB makes of each, against what the migration re-declares.
+#[derive(MagicLog)]
+#[log(name = "kinds", schema = "private")]
+struct Kinds {
+    #[log(id)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, indexed)]
+    small: i16,
+    #[log(filter, indexed)]
+    whole: i32,
+    #[log(filter, indexed)]
+    big: i64,
+    #[log(filter, indexed, sql = "real")]
+    ratio: f32,
+    #[log(filter, indexed)]
+    share: f64,
+    #[log(filter, indexed)]
+    flag: bool,
+    #[log(filter, indexed)]
+    word: String,
+    #[log(filter, indexed)]
+    ref_id: Uuid,
+    #[log(filter, indexed)]
+    seen: DateTime<Utc>,
+    #[log(filter, indexed, sql = "numeric")]
+    amount: String,
+    #[log(filter, indexed, sql = "date")]
+    day: String,
+    #[log(filter, indexed, sql = "interval")]
+    span: String,
+}
+
+#[sqlx::test(migrations = false)]
+async fn the_sparse_index_redeclared_for_an_indexed_column_is_timescaledbs_own(pool: PgPool) {
+    let _ = |k: Kinds| {
+        (
+            k.id, k.at, k.small, k.whole, k.big, k.ratio, k.share, k.flag, k.word, k.ref_id,
+            k.seen, k.amount, k.day, k.span,
+        )
+    };
+    sqlx::raw_sql(
+        "CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE SCHEMA private; \
+         CREATE TABLE private.kinds (id uuid NOT NULL, at timestamptz NOT NULL, small smallint, \
+             whole integer, big bigint, ratio real, share double precision, flag boolean, word text, \
+             ref_id uuid, seen timestamptz, amount numeric, day date, span interval, PRIMARY KEY (id, at))",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let spec = Kinds::SPEC;
+    sqlx::raw_sql(&held(migration(&spec, plain)))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(&format!(
+        "INSERT INTO private.kinds SELECT gen_random_uuid(), '{start}'::timestamptz + n * interval '1 minute', \
+                n % 100, n, n, n / 7.0, n / 3.0, n % 2 = 0, 'w' || (n % 50), gen_random_uuid(), \
+                '{start}'::timestamptz + n * interval '1 second', n / 10.0, '2026-10-01'::date + n % 9, \
+                n * interval '1 second' FROM generate_series(0, 1439) n; \
+         SELECT count(compress_chunk(c)) FROM show_chunks('private.kinds') c;",
+        start = day().to_rfc3339()
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    // The release's own choice, from the compressed chunk's settings (2.22 on).
+    let made: Option<Vec<(String, String)>> = sqlx::query_as::<_, (String, String)>(
+        "SELECT e->>'column', e->>'type' \
+           FROM timescaledb_information.chunk_columnstore_settings s, \
+                jsonb_array_elements(to_jsonb(s) -> 'index') e \
+          WHERE s.hypertable = 'private.kinds'::regclass AND e->>'source' = 'default' \
+            AND jsonb_typeof(e -> 'column') = 'string'",
+    )
+    .fetch_all(&pool)
+    .await
+    .ok();
+    let Some(made) = made.filter(|m| !m.is_empty()) else {
+        eprintln!("this release reports no sparse index of a chunk: nothing to compare");
+        return;
+    };
+    // What the migration declares, once any field declares one of its own.
+    let mut fields = spec.fields.to_vec();
+    fields.push(magic_logs::Field {
+        column: magic_logs::Column {
+            name: "marker",
+            sql: "bigint",
+        },
+        counted: false,
+        per_top: false,
+        indexed: false,
+        sparse: Some(magic_logs::Sparse::MinMax),
+    });
+    let mut declared = spec;
+    declared.fields = Box::leak(fields.into_boxed_slice());
+    let sql = migration(&declared, plain);
+    let setting = sql
+        .split("timescaledb.sparse_index = ''")
+        .nth(1)
+        .and_then(|rest| rest.split("'')").next())
+        .unwrap_or_default();
+    for f in spec.fields.iter().filter(|f| f.indexed) {
+        let name = f.column.name;
+        let own = made.iter().find(|(c, _)| c == name).map(|(_, kind)| {
+            if kind == "minmax" {
+                "minmax"
+            } else {
+                "bloom"
+            }
+        });
+        let redeclared = ["minmax", "bloom"]
+            .into_iter()
+            .find(|k| setting.contains(&format!("{k}(\"{name}\")")));
+        assert_eq!(
+            redeclared, own,
+            "{name} ({}): made {made:?}, declared {setting}",
+            f.column.sql
+        );
+    }
+}

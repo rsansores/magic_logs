@@ -622,9 +622,27 @@ pub fn grouped(
     Ok(qb)
 }
 
-/// `sql` without its typmods: `numeric(15,3)` is `numeric`,
-/// `timestamp(3) with time zone` is `timestamp with time zone`.
+/// `sql` without its typmods where the bare type is unbounded: `numeric(15,3)`
+/// is `numeric`, `varchar(3)` is `varchar`, `timestamp(3) with time zone` is
+/// `timestamp with time zone`. Any other is left as it is: a bare `char` is
+/// `char(1)`, a bare `bit` is `bit(1)`.
 fn bare_type(sql: &str) -> String {
+    let stripped = strip_typmods(sql);
+    let lower = stripped.to_ascii_lowercase();
+    let base = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let unbounded = matches!(
+        base,
+        "numeric" | "decimal" | "varchar" | "character varying"
+    ) || base.starts_with("timestamp")
+        || base.starts_with("time");
+    if unbounded {
+        stripped
+    } else {
+        sql.to_owned()
+    }
+}
+
+fn strip_typmods(sql: &str) -> String {
     let mut out = String::new();
     let mut depth = 0;
     for c in sql.chars() {

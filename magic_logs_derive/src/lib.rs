@@ -211,6 +211,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             .ident
             .as_ref()
             .map_or(Span::call_site(), syn::Ident::span);
+        if flags.facet && (flags.tenant || flags.scope) {
+            return Err(syn::Error::new(
+                at,
+                "the tenant and the scope are kept in every count: not also a `facet`",
+            ));
+        }
         if flags.per_top && !flags.facet {
             return Err(syn::Error::new(at, "`per_top` qualifies a `facet`"));
         }
@@ -375,6 +381,14 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         }
         None => level,
     };
+    for (lit, what) in [(&table.name, "name"), (&table.schema, "schema")] {
+        if let Some(lit) = lit.as_ref().filter(|l| l.value().contains('$')) {
+            return Err(syn::Error::new_spanned(
+                lit,
+                format!("`{what}` holds a `$`, which the migration's quoted blocks cannot"),
+            ));
+        }
+    }
     if view_schema == schema {
         return Err(syn::Error::new_spanned(
             ident,

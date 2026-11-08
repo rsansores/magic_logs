@@ -143,6 +143,9 @@ export function useLogExplorer<F extends string, R extends string = never>(
     ...fieldNames.map((f) => specs[f]!.key ?? f),
     ...rangeNames.map((r) => rangeSpecs[r]!.key ?? r),
   ]
+  const both = rangeNames.find((r) => (fieldNames as readonly string[]).includes(r))
+  if (both !== undefined)
+    throw new Error(`"${both}" is a field and a range: a question names it once, as one or the other`)
   const twice = keys.find((k, i) => keys.indexOf(k) !== i)
   if (twice !== undefined)
     throw new Error(`the explorer keeps two things under "${twice}": give one a \`key\` of its own`)

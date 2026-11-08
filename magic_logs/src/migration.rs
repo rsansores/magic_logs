@@ -273,12 +273,12 @@ pub(crate) fn segmented(spec: &Spec) -> String {
 
 /// The table's `sparse_index` setting: each field's, in declaration order;
 /// none when no field declares one. Declaring any takes the place of those
-/// TimescaleDB makes of itself — of each column with an index, a `minmax`
-/// for a time or a number kept exactly, a bloom filter for any other — so
-/// the migration declares those too, after the fields' own: the `top`'s and
-/// every `indexed` field's, but the time's, the id's and a segment_by
-/// column's, which the order and the segments already hold. What is still
-/// lost are the blooms TimescaleDB makes of several columns of one index.
+/// TimescaleDB makes of itself for each column with an index ([`own_sparse`])
+/// — so the migration declares those too, after the fields' own: the
+/// `top`'s and every `indexed` field's, but the time's, the id's and a
+/// segment_by column's, which the order and the segments already hold.
+/// What is still lost are the ones TimescaleDB makes for an index of the
+/// host's own and the blooms it makes of several columns of one index.
 pub(crate) fn sparse_index(spec: &Spec) -> Option<String> {
     let mut declared: Vec<(&str, &str)> = spec
         .fields
@@ -310,21 +310,33 @@ pub(crate) fn sparse_index(spec: &Spec) -> Option<String> {
     )
 }
 
-/// The sparse index TimescaleDB makes of itself for a column with an index:
-/// `minmax` for a time or a number kept exactly, `bloom` for the rest.
+/// The sparse index TimescaleDB makes of itself for a column with an index,
+/// as 2.21 to 2.31 make them: `minmax` for a time, a date, a `numeric`, a
+/// `smallint`, a float and a boolean; a bloom filter for the rest (`integer`,
+/// `bigint`, text, a uuid, an enum, an interval). A test holds this to what
+/// the release makes.
 fn own_sparse(sql: &str) -> &'static str {
     let lower = sql.trim().to_ascii_lowercase();
     let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    let ordered = [
-        "timestamp",
-        "date",
-        "time",
-        "numeric",
-        "decimal",
-        "interval",
-    ]
-    .iter()
-    .any(|t| bare.starts_with(t));
+    let base = bare.split('(').next().unwrap_or(bare).trim();
+    let ordered = base.starts_with("timestamp")
+        || base.starts_with("time ")
+        || matches!(
+            base,
+            "time"
+                | "timetz"
+                | "date"
+                | "numeric"
+                | "decimal"
+                | "smallint"
+                | "int2"
+                | "real"
+                | "float4"
+                | "double precision"
+                | "float8"
+                | "boolean"
+                | "bool"
+        );
     if ordered {
         "minmax"
     } else {

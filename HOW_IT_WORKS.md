@@ -34,8 +34,9 @@ compressed chunk (a thousand rows of a segment), its least and greatest
 value, or a bloom filter of its values. A filter on the field skips the
 batches that cannot hold a match. Declaring any replaces those TimescaleDB
 makes of itself for indexed columns, so the migration declares them too: a
-`minmax` of an indexed time or `numeric`, a bloom of any other (the blooms
-it makes of several columns of one index are not kept). TimescaleDB declares them from 2.22 on;
+`minmax` of an indexed time, date, `numeric`, `smallint`, float or
+boolean, a bloom of any other. What is lost is what it makes for an index of
+the host's own, and the blooms it makes of several columns of one index. TimescaleDB declares them from 2.22 on;
 on 2.21 the migration leaves them out, and a chunk keeps only the ones
 TimescaleDB makes of itself (for a column with an index).
 

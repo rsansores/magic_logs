@@ -15,6 +15,9 @@ counts.
   `histogram_by` stacks by any field, or by none, from the rows when no
   count keeps it. `Bucket.level` is `Bucket.stack`, and `histogram_tier`
   takes the stack.
+- **The derive refuses** a `$` in `name` or `schema` (a migration's quoted
+  block cannot hold one), and a `facet` that is also the `tenant` or the
+  `scope`, which every count keeps already.
 - **Tables that count nothing.** A table with no `level`, `facet` or `top`
   is stored as its rows alone: the hypertable, its indexes, its columnstore
   and its view, no counts (`Spec::counts`). Such a table made by 0.1 has
@@ -28,10 +31,11 @@ counts.
   2.22.1 and later, beside the sparse index TimescaleDB makes of each
   indexed column (a `minmax` of a time or a `numeric`, a bloom of any
   other), which declaring any would otherwise drop. A table made by 0.1 is unchanged; one
-  that adds them runs `ALTER TABLE … SET (timescaledb.segmentby = …)` and,
-  on 2.22.1 and later, `ALTER TABLE … SET (timescaledb.sparse_index = …)` as
-  `drift` and the migration's golden copy spell it, each applying to the
-  chunks compressed from then on.
+  that adds them runs, on 2.22.1 and later, `ALTER TABLE … SET
+  (timescaledb.sparse_index = …)` as the migration spells it, and then
+  `ALTER TABLE … SET (timescaledb.segmentby = …)` — in that order, as a
+  segment column refuses a sparse index — each applying to the chunks
+  compressed from then on.
 - A value a filter compares is cast in place, to the column's bare type,
   when that type reads text the same in every session (a number, text, a
   uuid, a boolean), so the filter can run vectorized on compressed batches
