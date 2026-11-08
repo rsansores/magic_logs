@@ -18,8 +18,8 @@ counts.
 - **`Error::DoesNotFit`**: a filter value a `bit(n)`, `varbit(n)` or
   `"char"` column cannot hold whole, which the cast would cut or pad into
   another value, is refused before any SQL.
-- **The derive refuses** a `$` in `name` or `schema` (a migration's quoted
-  block cannot hold one), and a `facet` that is also the `tenant` or the
+- **The derive refuses** a `$` in `name` or `schema` (so no name can end
+  a quoted block of the migration), and a `facet` that is also the `tenant` or the
   `scope`, which every count keeps already.
 - **Tables that count nothing.** A table with no `level`, `facet` or `top`
   is stored as its rows alone: the hypertable, its indexes, its columnstore

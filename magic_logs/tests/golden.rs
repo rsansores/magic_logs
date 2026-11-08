@@ -388,3 +388,31 @@ fn a_bounded_character_or_bit_value_is_compared_whole() {
         );
     }
 }
+
+/// A type whose name only begins like a built-in one is cast to itself.
+#[derive(MagicLog)]
+#[log(name = "units", schema = "telemetry")]
+struct Unit {
+    #[log(id)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, sql = "interval_unit")]
+    unit: String,
+    #[log(filter, sql = "timestamp_kind")]
+    stamp: String,
+}
+
+#[test]
+fn a_type_named_like_a_built_in_one_is_cast_to_itself() {
+    let _ = |u: Unit| (u.id, u.at, u.unit, u.stamp);
+    let filter = Filter::new(day(), day() + Duration::days(1))
+        .with("unit", ["hours"])
+        .with("stamp", ["x"]);
+    let sql = page(&Unit::SPEC, &filter, None, 10)
+        .unwrap()
+        .sql()
+        .to_owned();
+    assert!(sql.contains("$3::interval_unit"), "{sql}");
+    assert!(sql.contains("$4::timestamp_kind"), "{sql}");
+}

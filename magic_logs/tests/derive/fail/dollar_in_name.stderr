@@ -1,4 +1,4 @@
-error: `name` holds a `$`, which the migration's quoted blocks cannot
+error: `name` holds a `$`: refused, so no name can end a quoted block of the migration
  --> tests/derive/fail/dollar_in_name.rs:5:14
   |
 5 | #[log(name = "ev$ml$ents", schema = "logs")]

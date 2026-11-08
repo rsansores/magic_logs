@@ -397,7 +397,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         if let Some(lit) = lit.as_ref().filter(|l| l.value().contains('$')) {
             return Err(syn::Error::new_spanned(
                 lit,
-                format!("`{what}` holds a `$`, which the migration's quoted blocks cannot"),
+                format!("`{what}` holds a `$`: refused, so no name can end a quoted block of the migration"),
             ));
         }
     }

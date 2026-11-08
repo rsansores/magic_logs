@@ -321,11 +321,11 @@ fn own_sparse(sql: &str) -> &'static str {
     let lower = sql.trim().to_ascii_lowercase();
     let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
     let base = bare.split('(').next().unwrap_or(bare).trim();
-    let ordered = base.starts_with("timestamp")
-        || base.starts_with("time ")
+    let ordered = crate::query::is_type(base, "timestamp")
+        || crate::query::is_type(base, "time")
         || matches!(
             base,
-            "time"
+            "timestamptz"
                 | "timetz"
                 | "date"
                 | "numeric"

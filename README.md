@@ -278,7 +278,9 @@ sent as text and cast by the database to the column's type: one that does
 not read (`not-a-uuid` for a `uuid`, a number out of range, a date that is
 not one) is refused there with a data exception, SQLSTATE class `22`
 (`22P02`, `22003`, `22007`, …), which is the caller's mistake too. A search is words, as typed: a row
-matches when every word is in one of its searched columns, in any order;
+matches when every word is in one of its searched columns, in any order.
+A facet counts its field under every other field's filter but its own,
+a range of it included;
 `%` and `_` match themselves.
 
 With the `serde` feature, `Bucket`, `FacetCount` and `Group` serialize as

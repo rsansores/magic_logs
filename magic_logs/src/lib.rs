@@ -4,7 +4,7 @@
 //! A row type says, with `#[derive(MagicLog)]`, which column is its time,
 //! which its level, which its facets, its `top` and its scope.
 //! [`migration`] prints the SQL that makes the table a compressed hypertable
-//! counted by hour and by day, and per `top`; [`page`], [`histogram`],
+//! — counted by hour and by day, and per `top`, when it counts something; [`page`], [`histogram`],
 //! [`facets`] and [`grouped`] build the queries, each read from the cheapest
 //! table that answers it. Authorization is the host's: every relation is read
 //! through a view the host makes, in [`Spec::view_schema`].

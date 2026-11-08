@@ -656,8 +656,9 @@ fn bare_type(sql: &str) -> String {
         | "char varying"
         | "national character varying"
         | "nchar varying" => stripped,
-        _ if base.starts_with("interval") => "interval".to_owned(),
-        _ if base.starts_with("timestamp") || base.starts_with("time") => stripped,
+        _ if is_type(base, "interval") => "interval".to_owned(),
+        "timestamptz" | "timetz" => stripped,
+        _ if is_type(base, "timestamp") || is_type(base, "time") => stripped,
         _ => sql.to_owned(),
     }
 }
@@ -674,6 +675,16 @@ fn strip_typmods(sql: &str) -> String {
         }
     }
     out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether `base` is the built-in type `name`, bare or followed by what
+/// spells it (`time with time zone`, `interval day`), not a type of another
+/// name that begins alike (`interval_unit`).
+pub(crate) fn is_type(base: &str, name: &str) -> bool {
+    base == name
+        || base
+            .strip_prefix(name)
+            .is_some_and(|rest| rest.starts_with(' '))
 }
 
 /// Whether `value` is a value of `sql` whole, for the types whose cast from
@@ -696,7 +707,8 @@ fn fits(sql: &str, value: &str) -> bool {
         // One byte, or one written as an octal escape (`\101`).
         let octal = value.len() == 4
             && value.starts_with('\\')
-            && value[1..].bytes().all(|b| (b'0'..=b'7').contains(&b));
+            && (b'0'..=b'3').contains(&value.as_bytes()[1])
+            && value[2..].bytes().all(|b| (b'0'..=b'7').contains(&b));
         return value.len() <= 1 || octal;
     }
     // As the bit input reads it: binary after `b`, four bits a digit after
