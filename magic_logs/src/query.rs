@@ -95,9 +95,16 @@ impl Filter {
         if self.to <= self.from {
             return Err(Error::Window);
         }
-        for (i, (name, _)) in self.fields.iter().enumerate() {
-            if spec.field(name).is_none() {
+        for (i, (name, condition)) in self.fields.iter().enumerate() {
+            let Some(field) = spec.field(name) else {
                 return Err(Error::UnknownField(name.clone()));
+            };
+            let values: Vec<&String> = match condition {
+                Condition::AnyOf(values) => values.iter().collect(),
+                Condition::Between { min, max } => min.iter().chain(max.iter()).collect(),
+            };
+            if let Some(v) = values.into_iter().find(|v| !fits(field.column.sql, v)) {
+                return Err(Error::DoesNotFit(name.clone(), v.clone()));
             }
             if self.fields[..i].iter().any(|(n, _)| n == name) {
                 return Err(Error::FieldTwice(name.clone()));
@@ -633,8 +640,8 @@ pub fn grouped(
 /// nothing: without its typmods (`numeric(15,3)` is `numeric`, `varchar(3)`
 /// `varchar`, `timestamp(3) with time zone` `timestamp with time zone`, an
 /// `interval day` an `interval`), and `char(n)` as `bpchar` — bare, it holds
-/// one character. Any other is left as it is: a `bit(n)` refuses a value of
-/// another length rather than cutting it.
+/// one character. Any other is left as it is: a `bit(n)` value of another
+/// length is refused before ([`Filter::check`]), as the cast would cut it.
 fn bare_type(sql: &str) -> String {
     let stripped = strip_typmods(sql);
     let lower = stripped.to_ascii_lowercase();
@@ -661,6 +668,34 @@ fn strip_typmods(sql: &str) -> String {
         }
     }
     out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether `value` is a value of `sql` whole, for the types whose cast from
+/// text cuts or pads instead of refusing: a `bit(n)` holds `n` bits, a
+/// `varbit(n)` up to `n`, a `"char"` one byte. Any other type is the
+/// database's to judge.
+fn fits(sql: &str, value: &str) -> bool {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let length = |prefix: &str| -> Option<usize> {
+        bare.strip_prefix(prefix)?
+            .trim()
+            .strip_prefix('(')?
+            .strip_suffix(')')?
+            .trim()
+            .parse()
+            .ok()
+    };
+    if bare == "\"char\"" {
+        return value.len() <= 1;
+    }
+    if let Some(n) = length("varbit").or_else(|| length("bit varying")) {
+        return value.len() <= n;
+    }
+    match length("bit") {
+        Some(n) => value.len() == n,
+        None => true,
+    }
 }
 
 /// Whether text is read as `sql` the same way whatever the session's

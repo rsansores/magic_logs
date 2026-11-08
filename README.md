@@ -267,7 +267,7 @@ field, or by none.
 A refused question — a window that ends before it begins, a field the table
 does not have, one named twice, a search of a table that searches nothing,
 a step shorter than a microsecond or not whole microseconds, a negative
-limit — is an
+limit, a value a `bit(n)` or `"char"` column cannot hold whole — is an
 [`Error`](https://docs.rs/magic_logs/latest/magic_logs/enum.Error.html),
 before any SQL is written: answer it as the caller's mistake. A value is
 sent as text and cast by the database to the column's type: one that does

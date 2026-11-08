@@ -264,6 +264,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 )
             })?,
         };
+        if (flags.minmax || flags.bloom) && no_sparse(&sql) {
+            return Err(syn::Error::new(
+                at,
+                format!("`{sql}` has no order and no hash: no sparse index can be made of it"),
+            ));
+        }
         if flags.bloom && no_hash(&sql) {
             return Err(syn::Error::new(
                 at,
@@ -406,11 +412,15 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
     // Every relation and index the migration names, whole: PostgreSQL cuts
     // a longer name short, and two cut alike collide.
-    let mut names = vec![
-        format!("{name}_hourly"),
-        format!("{name}_daily"),
-        format!("{name}_{}_{}_idx", time.name, id.name),
-    ];
+    // A table that counts nothing makes no counts, and so no count's name.
+    let counts = cols
+        .iter()
+        .any(|c| c.flags.level || c.flags.facet || c.flags.top);
+    let mut names = vec![format!("{name}_{}_{}_idx", time.name, id.name)];
+    if counts {
+        names.push(format!("{name}_hourly"));
+        names.push(format!("{name}_daily"));
+    }
     if let Some(top) = top {
         let short = top.name.strip_suffix("_id").unwrap_or(&top.name);
         names.push(format!("{name}_daily_{short}"));
@@ -508,6 +518,16 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             };
         }
     })
+}
+
+/// Whether `sql` is a type TimescaleDB makes no sparse index of at all.
+fn no_sparse(sql: &str) -> bool {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    matches!(
+        bare,
+        "json" | "xml" | "point" | "line" | "lseg" | "box" | "path" | "polygon" | "circle"
+    )
 }
 
 /// Whether `sql` is a type TimescaleDB builds no bloom filter of.

@@ -112,4 +112,9 @@ pub enum Error {
     /// `grouped` asked of a table with no `#[log(top)]`.
     #[error("the table has no `top` to group by")]
     NoTop,
+    /// A value no row of the field can hold: a bit string of another length
+    /// than a `bit(n)`'s, longer than a `varbit(n)`'s, or more than one
+    /// byte for a `"char"`. Cast, it would be cut or padded into another.
+    #[error("`{1}` cannot be a value of `{0}`")]
+    DoesNotFit(String, String),
 }

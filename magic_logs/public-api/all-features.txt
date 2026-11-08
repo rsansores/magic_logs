@@ -21,6 +21,7 @@ impl core::marker::UnsafeUnpin for magic_logs::Condition
 impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Condition
 impl core::panic::unwind_safe::UnwindSafe for magic_logs::Condition
 pub enum magic_logs::Error
+pub magic_logs::Error::DoesNotFit(alloc::string::String, alloc::string::String)
 pub magic_logs::Error::FieldTwice(alloc::string::String)
 pub magic_logs::Error::Limit
 pub magic_logs::Error::NoTop

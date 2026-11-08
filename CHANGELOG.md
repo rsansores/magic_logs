@@ -15,6 +15,9 @@ counts.
   `histogram_by` stacks by any field, or by none, from the rows when no
   count keeps it. `Bucket.level` is `Bucket.stack`, and `histogram_tier`
   takes the stack.
+- **`Error::DoesNotFit`**: a filter value a `bit(n)`, `varbit(n)` or
+  `"char"` column cannot hold whole, which the cast would cut or pad into
+  another value, is refused before any SQL.
 - **The derive refuses** a `$` in `name` or `schema` (a migration's quoted
   block cannot hold one), and a `facet` that is also the `tenant` or the
   `scope`, which every count keeps already.
@@ -31,8 +34,9 @@ counts.
   2.22.1 and later, beside the sparse index TimescaleDB makes of each
   indexed column (a `minmax` of a time, a date, a number other than an
   `integer` or `bigint`, a boolean, `money`, a bit string or a text search
-  type; a bloom of any other), which declaring any would otherwise drop.
-  The derive refuses a `bloom` of a type with no hash. A table made by 0.1 is unchanged; one
+  type, a `"char"`; a bloom of any other), which declaring any would
+  otherwise drop. The derive refuses a `bloom` of a type with no hash, and
+  either of a type with neither order nor hash (`json`, `xml`, a geometric). A table made by 0.1 is unchanged; one
   that adds them runs `ALTER TABLE … SET (timescaledb.segmentby = …)` and
   then, on 2.22.1 and later, `ALTER TABLE … SET (timescaledb.sparse_index =
   …)` as the migration spells it — in that order, as a column 0.1 segmented
@@ -63,7 +67,8 @@ counts.
   `useLogExplorer`'s `ranges` option (`RangeOptions`) and its `ranges` and
   `rangeNames`, cleared by `clear` and counted by `narrowed`;
   `LogExplorer` and `LogExplorerOptions` take a second type parameter, the
-  ranges' names (`never` when there are none).
+  ranges' names: `useLogExplorer` infers `never` when there are none, and
+  `LogExplorer`'s default is `string`, which every explorer fits.
 - `examples/fleet`: an odometer filtered by range, the trucks' positions as
   a table that counts nothing, and `drift` at start.
 

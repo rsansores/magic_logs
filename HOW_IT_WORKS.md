@@ -39,8 +39,8 @@ only those TimescaleDB makes of itself, for a column with an index.
 
 Declaring any replaces those TimescaleDB makes of itself for indexed
 columns, so the migration declares them too: a `minmax` of an indexed time,
-date, `numeric`, `smallint`, float, boolean, `money`, bit string or text
-search type, a bloom of any other. What is
+date, `numeric`, `smallint`, float, boolean, `money`, bit string, text
+search type or `"char"`, a bloom of any other. What is
 lost is what it makes for an index of the host's own, and the blooms it
 makes of several columns of one index, the primary key's among them.
 

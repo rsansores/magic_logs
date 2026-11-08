@@ -333,7 +333,8 @@ fn a_declared_sparse_index_keeps_timescaledbs_own_but_the_ids() {
 }
 
 /// A `char(n)` filter compares with its value whole, cast to `bpchar`, not
-/// cut to `n`; a `bit(n)` keeps its type, which refuses another length.
+/// cut to `n`; a `bit(n)` keeps its type, and a value of another length is
+/// refused before the cast could cut or pad it.
 #[derive(MagicLog)]
 #[log(name = "codes", schema = "telemetry")]
 struct Code {
@@ -345,18 +346,28 @@ struct Code {
     code: String,
     #[log(filter, sql = "bit(3)")]
     flags: String,
+    #[log(filter, sql = "varbit(4)")]
+    mask: String,
 }
 
 #[test]
 fn a_bounded_character_or_bit_value_is_compared_whole() {
-    let _ = |c: Code| (c.id, c.at, c.code, c.flags);
-    let filter = Filter::new(day(), day() + Duration::days(1))
+    let _ = |c: Code| (c.id, c.at, c.code, c.flags, c.mask);
+    let window = || Filter::new(day(), day() + Duration::days(1));
+    let filter = window()
         .with("code", ["abcd"])
-        .with("flags", ["1011", "1"]);
+        .with("flags", ["101", "011"]);
     let sql = page(&Code::SPEC, &filter, None, 10)
         .unwrap()
         .sql()
         .to_owned();
     assert!(sql.contains(r#""code" = $3::bpchar"#), "{sql}");
     assert!(sql.contains(r#""flags" = ANY($4::bit(3)[])"#), "{sql}");
+    for (field, value) in [("flags", "1011"), ("flags", "1"), ("mask", "10101")] {
+        assert_eq!(
+            page(&Code::SPEC, &window().with(field, [value]), None, 10).err(),
+            Some(magic_logs::Error::DoesNotFit(field.into(), value.into())),
+        );
+    }
+    assert!(page(&Code::SPEC, &window().with("mask", ["10"]), None, 10).is_ok());
 }
