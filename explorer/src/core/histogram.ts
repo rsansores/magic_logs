@@ -10,7 +10,8 @@ export function stack(rows: readonly BucketRow[]): Bucket[] {
   const byAt = new Map<number, Record<string, number>>()
   for (const row of rows) {
     const at = Date.parse(row.bucket)
-    const counts = byAt.get(at) ?? {}
+    // No prototype: a stack is any field's value, `constructor` among them.
+    const counts = byAt.get(at) ?? (Object.create(null) as Record<string, number>)
     const stack = row.stack ?? ''
     counts[stack] = (counts[stack] ?? 0) + row.count
     byAt.set(at, counts)
@@ -24,7 +25,7 @@ export function fill(buckets: readonly Bucket[], range: Range, step: number): Bu
   const byAt = new Map(buckets.map((b) => [b.at, b.counts]))
   const out: Bucket[] = []
   for (let at = Math.floor(range.from.getTime() / step) * step; at < range.to.getTime(); at += step)
-    out.push({ at, counts: byAt.get(at) ?? {} })
+    out.push({ at, counts: byAt.get(at) ?? (Object.create(null) as Record<string, number>) })
   return out
 }
 

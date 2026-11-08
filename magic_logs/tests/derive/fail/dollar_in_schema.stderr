@@ -1,0 +1,5 @@
+error: `schema` holds a `$`, which the migration's quoted blocks cannot
+ --> tests/derive/fail/dollar_in_schema.rs:5:33
+  |
+5 | #[log(name = "events", schema = "lo$gs")]
+  |                                 ^^^^^^^

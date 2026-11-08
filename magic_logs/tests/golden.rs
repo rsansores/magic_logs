@@ -363,11 +363,28 @@ fn a_bounded_character_or_bit_value_is_compared_whole() {
         .to_owned();
     assert!(sql.contains(r#""code" = $3::bpchar"#), "{sql}");
     assert!(sql.contains(r#""flags" = ANY($4::bit(3)[])"#), "{sql}");
-    for (field, value) in [("flags", "1011"), ("flags", "1"), ("mask", "10101")] {
+    for (field, value) in [
+        ("flags", "1011"),
+        ("flags", "1"),
+        ("flags", "b1011"),
+        ("flags", "x1"),
+        ("mask", "10101"),
+        ("mask", "xFF"),
+    ] {
         assert_eq!(
             page(&Code::SPEC, &window().with(field, [value]), None, 10).err(),
             Some(magic_logs::Error::DoesNotFit(field.into(), value.into())),
         );
     }
-    assert!(page(&Code::SPEC, &window().with("mask", ["10"]), None, 10).is_ok());
+    for (field, value) in [
+        ("mask", "10"),
+        ("mask", "b1111"),
+        ("mask", "xF"),
+        ("flags", "b101"),
+    ] {
+        assert!(
+            page(&Code::SPEC, &window().with(field, [value]), None, 10).is_ok(),
+            "{value}"
+        );
+    }
 }

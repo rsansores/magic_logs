@@ -648,8 +648,14 @@ fn bare_type(sql: &str) -> String {
     let base = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
     match base {
         // Bare, these are one character or one bit: their unbounded kin.
-        "char" | "character" | "bpchar" => "bpchar".to_owned(),
-        "numeric" | "decimal" | "varchar" | "character varying" => stripped,
+        "char" | "character" | "bpchar" | "nchar" | "national character" => "bpchar".to_owned(),
+        "numeric"
+        | "decimal"
+        | "varchar"
+        | "character varying"
+        | "char varying"
+        | "national character varying"
+        | "nchar varying" => stripped,
         _ if base.starts_with("interval") => "interval".to_owned(),
         _ if base.starts_with("timestamp") || base.starts_with("time") => stripped,
         _ => sql.to_owned(),
@@ -687,13 +693,27 @@ fn fits(sql: &str, value: &str) -> bool {
             .ok()
     };
     if bare == "\"char\"" {
-        return value.len() <= 1;
+        // One byte, or one written as an octal escape (`\101`).
+        let octal = value.len() == 4
+            && value.starts_with('\\')
+            && value[1..].bytes().all(|b| (b'0'..=b'7').contains(&b));
+        return value.len() <= 1 || octal;
     }
+    // As the bit input reads it: binary after `b`, four bits a digit after
+    // `x`, binary otherwise.
+    let bits = || match value.as_bytes().first() {
+        Some(b'b' | b'B') => value.len() - 1,
+        Some(b'x' | b'X') => 4 * (value.len() - 1),
+        _ => value.len(),
+    };
     if let Some(n) = length("varbit").or_else(|| length("bit varying")) {
-        return value.len() <= n;
+        return bits() <= n;
+    }
+    if bare == "bit" {
+        return bits() == 1;
     }
     match length("bit") {
-        Some(n) => value.len() == n,
+        Some(n) => bits() == n,
         None => true,
     }
 }

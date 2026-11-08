@@ -165,7 +165,7 @@ pub struct Reading {
 | field | `filter` | a filter the counts do not keep: naming it reads the rows |
 | field | `minmax`, `bloom` | of a column a filter names: what a compressed batch keeps of it, so a filter skips the batches that cannot match — `minmax` its range, for ranges; `bloom` its values, for equality. Made on TimescaleDB 2.22.1 and later, beside those TimescaleDB would have made of each indexed column; those it makes of several columns of one index (the primary key's among them) and for an index of yours are lost. A bloom serves a filter of one value on every release, of several from 2.31 |
 | field | `search` | searched as text, every such column |
-| field | `sql = "…"` | the SQL type a filter's values are cast to, when the Rust type does not say (an enum) |
+| field | `sql = "…"` | the SQL type a filter's values are cast to, when the Rust type does not say (an enum): the type itself, not a domain over it, which the checks below cannot see through |
 
 A field with no `#[log(…)]` is still read by a page (it is a column of the
 row), and nothing else. The derive refuses what the migration could not
@@ -173,7 +173,11 @@ make: `schema` and `view_schema` the same (a view over itself), a counted
 column named `bucket`, `events`, `first_at` or `last_at` (the counts' own),
 a relation or index name past PostgreSQL's 63 bytes, a sparse index of a
 segment_by column, of the time or of the id (a segment holds one value of
-the first, and is ordered by the others), and a `stack` that is not counted.
+the first, and is ordered by the others), a `bloom` of a type with no hash
+(`money`, a bit string, a text search type), either sparse index of a type
+with neither order nor hash (`json`, `xml`, a geometric type), a `$` in
+`name` or `schema`, a `facet` that is the tenant or the scope, and a
+`stack` that is not counted.
 A field named `r#type` is the column `type`.
 
 A table that counts nothing — no `level`, no `facet`, no `top` — is stored

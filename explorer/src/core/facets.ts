@@ -30,7 +30,7 @@ export function facetOf(
 export function narrowed(question: Question): boolean {
   return (
     Object.values(question.fields).some((v) => v.length > 0) ||
-    Object.keys(question.ranges ?? {}).length > 0 ||
+    Object.values(question.ranges ?? {}).some((b) => !!(b.min || b.max)) ||
     !!question.search
   )
 }

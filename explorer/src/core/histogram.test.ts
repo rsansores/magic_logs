@@ -120,4 +120,17 @@ describe('selection', () => {
   it('selects one step for a press without a drag', () => {
     expect(selection(range, 0.3, 0.3, HOUR)).toEqual({ from: new Date(at(1)), to: new Date(at(2)) })
   })
+
+  it('stacks by a value that is also a name objects inherit', () => {
+    const rows = [
+      { bucket: new Date(at(0)).toISOString(), stack: 'constructor', count: 2 },
+      { bucket: new Date(at(0)).toISOString(), stack: '__proto__', count: 3 },
+    ]
+    const bars = geometry(stack(rows), { from: new Date(at(0)), to: new Date(at(1)) }, HOUR, ['toString'])
+    expect(bars.bars[0]!.total).toBe(5)
+    expect(bars.bars[0]!.segments.map((s) => [s.stack, s.count])).toEqual([
+      ['__proto__', 3],
+      ['constructor', 2],
+    ])
+  })
 })

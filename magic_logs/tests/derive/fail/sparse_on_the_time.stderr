@@ -1,0 +1,5 @@
+error: a sparse index is of a column a segment holds many values of: not of the time, the id or a segment_by column
+  --> tests/derive/fail/sparse_on_the_time.rs:10:9
+   |
+10 |     pub at: DateTime<Utc>,
+   |         ^^
