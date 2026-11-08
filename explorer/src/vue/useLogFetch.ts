@@ -248,13 +248,14 @@ export function useLogFetch<Row>(explorer: LogExplorer, fetchers: LogFetchers<Ro
   }
 }
 
-/** Whether `after` is `before` slid by the clock: the same fields and
- * search over a window as long, later. */
+/** Whether `after` is `before` slid by the clock: the same fields, ranges
+ * and search over a window as long, later. */
 function slide(before: Question, after: Question) {
   const span = (q: Question) => Date.parse(q.to) - Date.parse(q.from)
   return (
     Date.parse(after.to) > Date.parse(before.to) &&
     span(after) === span(before) &&
-    JSON.stringify([after.fields, after.search]) === JSON.stringify([before.fields, before.search])
+    JSON.stringify([after.fields, after.ranges, after.search]) ===
+      JSON.stringify([before.fields, before.ranges, before.search])
   )
 }

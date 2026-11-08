@@ -3,7 +3,7 @@
 // The state: the window, the chosen values, the search, live, the pages read
 // — kept in memory, in the address bar, or in the host's router.
 export { useLogExplorer } from './vue/useLogExplorer.js'
-export type { LogExplorer, LogExplorerOptions, FieldOptions } from './vue/useLogExplorer.js'
+export type { LogExplorer, LogExplorerOptions, FieldOptions, RangeOptions } from './vue/useLogExplorer.js'
 export { memoryStore, urlStore } from './vue/store.js'
 export type { Store } from './vue/store.js'
 

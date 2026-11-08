@@ -127,7 +127,7 @@ export function server(events: Event[]) {
       }
       const rows = [...counts].map(([key, count]) => {
         const [at, level] = key.split('|')
-        return { bucket: new Date(Number(at)).toISOString(), level: level!, count }
+        return { bucket: new Date(Number(at)).toISOString(), stack: level!, count }
       })
       return later(rows, signal)
     },

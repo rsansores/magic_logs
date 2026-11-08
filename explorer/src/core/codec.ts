@@ -73,3 +73,59 @@ function split(raw: string): string[] {
   out.push(value)
   return out
 }
+
+/** A range's bounds, each inclusive and either absent: what a field between
+ * two values holds, as magic_logs' `Condition::Between` reads it. */
+export interface Bounds {
+  min?: string
+  max?: string
+}
+
+/** A range as `min..max`, either side left empty (`1000..`, `..2026-10-01`),
+ * keeping the bounds `accept` takes. Neither is no range. A backslash, and a
+ * dot that could be read as the `..` between the two, is written after a
+ * backslash: `1000.5..2000` reads as it is. */
+export function between(accept: (bound: string) => boolean = () => true): Codec<Bounds> {
+  return {
+    parse: (raw) => {
+      const halves = cut(raw)
+      if (!halves) return undefined
+      const [min, max] = halves
+      if ((min && !accept(min)) || (max && !accept(max))) return undefined
+      const bounds: Bounds = { ...(min ? { min } : {}), ...(max ? { max } : {}) }
+      return bounds.min === undefined && bounds.max === undefined ? undefined : bounds
+    },
+    serialize: (value) => `${escapeBound(value.min ?? '')}..${escapeBound(value.max ?? '')}`,
+  }
+}
+
+/** The two sides of the first `..` no backslash escapes, unescaped. */
+function cut(raw: string): [string, string] | undefined {
+  let min = ''
+  let max = ''
+  let past = false
+  for (let i = 0; i < raw.length; i++) {
+    let c = raw[i]!
+    if (c === '\\' && i + 1 < raw.length) c = raw[++i]!
+    else if (!past && c === '.' && raw[i + 1] === '.') {
+      past = true
+      i++
+      continue
+    }
+    if (past) max += c
+    else min += c
+  }
+  return past ? [min, max] : undefined
+}
+
+function escapeBound(bound: string): string {
+  let out = ''
+  for (let i = 0; i < bound.length; i++) {
+    const c = bound[i]!
+    // A dot beside another, or at either end, could join the `..`.
+    const loose =
+      c === '.' && (i === 0 || i === bound.length - 1 || bound[i - 1] === '.' || bound[i + 1] === '.')
+    out += c === '\\' || loose ? `\\${c}` : c
+  }
+  return out
+}

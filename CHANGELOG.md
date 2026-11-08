@@ -1,5 +1,50 @@
 # Changelog
 
+## Unreleased
+
+Breaking: a filter field holds a `Condition`, a histogram row's `level` is
+its `stack`, `segment_by` is a list, and a table that counts nothing gets no
+counts.
+
+- **Ranges.** `Condition::{AnyOf, Between}`: a field is one of some values,
+  or between two inclusive bounds, either left out. `Filter::with` is
+  `AnyOf`; `Filter::with_condition` takes either. The counts answer a range
+  of a field they keep. `Filter::fields` holds `(field, Condition)`.
+- **Any stack.** `#[log(stack = "…")]` names the counted field the
+  histogram is stacked by, the `level` when left out (`Spec::stack`);
+  `histogram_by` stacks by any field, or by none, from the rows when no
+  count keeps it. `Bucket.level` is `Bucket.stack`, and `histogram_tier`
+  takes the stack.
+- **Tables that count nothing.** A table with no `level`, `facet` or `top`
+  is stored as its rows alone: the hypertable, its indexes, its columnstore
+  and its view, no counts (`Spec::counts`). Such a table made by 0.1 has
+  hourly and daily counts its declaration no longer has: `drift` names
+  them, and a host drops them (`DROP MATERIALIZED VIEW … CASCADE`, after
+  its views) or keeps them unread.
+- **Segments and sparse indexes.** `segment_by = "a, b"` segments by
+  several columns (`Storage::segment_by` is a slice). `#[log(minmax)]` and
+  `#[log(bloom)]` on a column a filter names are its sparse index
+  (`Field::sparse`, `Sparse`), declared by the migration on TimescaleDB
+  2.22 and later. A table made by 0.1 is unchanged; one that adds them
+  runs `ALTER TABLE … SET (timescaledb.segmentby = …, timescaledb.sparse_index
+  = …)`, which applies to the chunks compressed from then on.
+- **`drift`.** What the database holds, against the declaration: the
+  hypertable, its chunks, columnstore and policy, the indexes, every count
+  with its columns, refresh and columnstore, a count the table should not
+  have, and the views. One `Drift` per difference, for a test after a
+  host's migrations: a released migration is never edited, so this, not a
+  file comparison, is what keeps the database the declaration.
+- What the migration writes otherwise is unchanged: a table made by 0.1
+  with the same declaration is the table 0.2 declares.
+- `magic_logs_explorer`: `BucketRow.stack`, a histogram's `Segment.stack`
+  and its order as `stacks` (`geometry`, `useHistogram`, `LogHistogram`'s
+  prop), were `level` and `levels`. Ranges: `between`, a codec of
+  `min..max` either side empty; `Bounds`; `Question.ranges`;
+  `useLogExplorer`'s `ranges` option (`RangeOptions`) and its `ranges` and
+  `rangeNames`, cleared by `clear` and counted by `narrowed`.
+- `examples/fleet`: an odometer filtered by range, the trucks' positions as
+  a table that counts nothing, and `drift` at start.
+
 ## 0.1.1 — 2026-10-27
 
 - A search matches words: a row matches when every word of the search is

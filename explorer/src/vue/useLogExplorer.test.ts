@@ -23,6 +23,7 @@ function explorer(record: Record<string, string> = {}) {
   const e = scope.run(() =>
     useLogExplorer({
       fields: { kind: {}, unit: { accept: (v) => /^u\d+$/.test(v) } },
+      ranges: { volume: { key: 'attr.volume', accept: (b) => /^\d+$/.test(b) } },
       store: recordStore(record),
     }),
   )!
@@ -77,6 +78,32 @@ describe('useLogExplorer', () => {
     scope.stop()
   })
 
+  it('holds a range read from the store, asks with it, and lets it go on clear', () => {
+    const { e, scope } = explorer({ 'attr.volume': '1000..' })
+    expect(e.question.value.ranges).toEqual({ volume: { min: '1000' } })
+    expect(e.narrowed.value).toBe(true)
+    e.ranges.volume.value = { min: '1000', max: '5000' }
+    expect(e.question.value.ranges).toEqual({ volume: { min: '1000', max: '5000' } })
+    e.clear()
+    expect(e.question.value.ranges).toBeUndefined()
+    expect(e.narrowed.value).toBe(false)
+    scope.stop()
+  })
+
+  it('reads no range whose bound the range refuses', () => {
+    const { e, scope } = explorer({ 'attr.volume': 'lots..' })
+    expect(e.ranges.volume.value).toEqual({})
+    expect(e.question.value.ranges).toBeUndefined()
+    scope.stop()
+  })
+
+  it('refuses a range kept under a key a field has', () => {
+    vi.useFakeTimers({ now })
+    expect(() =>
+      useLogExplorer({ fields: ['kind'], ranges: { volume: { key: 'kind' } }, store: recordStore({}) }),
+    ).toThrow('two things under "kind"')
+  })
+
   it('runs no clock on a server render', async () => {
     const { e, scope } = explorer({ live: '1' })
     const before = e.question.value.to
@@ -93,7 +120,7 @@ describe('useLogFetch', () => {
     let release: (() => void) | undefined
     const answers = scope.run(() =>
       useLogFetch<{ id: string }>(e, {
-        histogram: async () => [{ bucket: new Date(now - HOUR).toISOString(), level: 'info', count: 2 }],
+        histogram: async () => [{ bucket: new Date(now - HOUR).toISOString(), stack: 'info', count: 2 }],
         facets: async (_q, fields) => fields.map((field) => ({ field, value: 'x', count: 1 })),
         page: async (q, cursor) => {
           if (q.fields.kind) await new Promise<void>((r) => (release = r))

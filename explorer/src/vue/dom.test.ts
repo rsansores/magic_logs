@@ -37,7 +37,7 @@ function counting(delay = 0, page?: LogFetchers<{ id: string }>['page']) {
   const fetchers: LogFetchers<{ id: string }> = {
     histogram: (_q, step) => (
       asked.histogram++,
-      later([{ bucket: new Date(now - HOUR).toISOString(), level: step.name, count: 1 }])
+      later([{ bucket: new Date(now - HOUR).toISOString(), stack: step.name, count: 1 }])
     ),
     facets: () => (asked.facets++, later([{ field: 'kind', value: 'door', count: 3 }])),
     page:
@@ -319,7 +319,7 @@ describe('useLogFetch while a slide waits', () => {
       c.fetchers.histogram = (_q, step) => {
         c.asked.histogram++
         return new Promise((r) =>
-          setTimeout(() => r([{ bucket: new Date(now).toISOString(), level: step.name, count: 1 }]), 2_500),
+          setTimeout(() => r([{ bucket: new Date(now).toISOString(), stack: step.name, count: 1 }]), 2_500),
         )
       }
       return { e, c, answers: useLogFetch(e, c.fetchers) }
@@ -549,7 +549,7 @@ describe('round six', () => {
       c.fetchers.histogram = (_q, step, signal) =>
         new Promise((resolve, reject) => {
           const t = setTimeout(
-            () => resolve([{ bucket: new Date(now).toISOString(), level: step.name, count: 1 }]),
+            () => resolve([{ bucket: new Date(now).toISOString(), stack: step.name, count: 1 }]),
             3_200,
           )
           signal.addEventListener('abort', () => (clearTimeout(t), reject(signal.reason)))
@@ -614,7 +614,7 @@ describe('round eight', () => {
           c.asked.histogram++
           const t = setTimeout(() => {
             landed++
-            resolve([{ bucket: new Date(now).toISOString(), level: step.name, count: 1 }])
+            resolve([{ bucket: new Date(now).toISOString(), stack: step.name, count: 1 }])
           }, 3_500)
           signal.addEventListener('abort', () => (clearTimeout(t), reject(signal.reason)))
         })
