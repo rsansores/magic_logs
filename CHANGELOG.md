@@ -31,17 +31,19 @@ counts.
   2.22.1 and later, beside the sparse index TimescaleDB makes of each
   indexed column (a `minmax` of a time or a `numeric`, a bloom of any
   other), which declaring any would otherwise drop. A table made by 0.1 is unchanged; one
-  that adds them runs, on 2.22.1 and later, `ALTER TABLE … SET
-  (timescaledb.sparse_index = …)` as the migration spells it, and then
-  `ALTER TABLE … SET (timescaledb.segmentby = …)` — in that order, as a
-  segment column refuses a sparse index — each applying to the chunks
-  compressed from then on.
+  that adds them runs `ALTER TABLE … SET (timescaledb.segmentby = …)` and
+  then, on 2.22.1 and later, `ALTER TABLE … SET (timescaledb.sparse_index =
+  …)` as the migration spells it — in that order, as a column 0.1 segmented
+  by refuses a sparse index until it is no longer a segment column — each
+  applying to the chunks compressed from then on. A bloom filter serves a
+  filter of one value on every release, and one of several values from 2.31.
 - A value a filter compares is cast in place, to the column's bare type,
   when that type reads text the same in every session (a number, text, a
   uuid, a boolean), so the filter can run vectorized on compressed batches
   (on 2.31: not for `numeric`); a timestamp's or an enum's is cast once, in
-  a sub-select, as before. A typmod no longer rounds a bound: `numeric(15,3)`
-  compares with the value as sent.
+  a sub-select, as before. A typmod of a `numeric`, a `varchar` or a time no
+  longer rounds or cuts a bound: `numeric(15,3)` compares with the value as
+  sent. A filter of one value is `=`, of several `= ANY`.
 - **`drift`.** What the database holds, against the declaration: the
   hypertable, its chunks, columnstore and policy, the indexes, every count
   with its columns, refresh (oldest first included) and columnstore, a count the table should not

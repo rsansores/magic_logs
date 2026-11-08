@@ -1261,6 +1261,11 @@ async fn a_table_that_counts_nothing_is_stored_and_read_as_its_rows(pool: PgPool
     .execute(&pool)
     .await
     .unwrap();
+    // Compressed, as it would be once two days old.
+    sqlx::raw_sql("SELECT count(compress_chunk(c)) FROM show_chunks('private.pings') c")
+        .execute(&pool)
+        .await
+        .unwrap();
     let filter = window(2).with_condition("strength", between(Some("10"), Some("19")));
     assert_eq!(magic_logs::parts(&spec, &filter, &[]).len(), 1);
     let bars: Vec<Bucket> = histogram(&spec, &filter, Duration::days(1))

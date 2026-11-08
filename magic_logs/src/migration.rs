@@ -137,7 +137,7 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         // TimescaleDB declares a column's sparse index from 2.22 on; on 2.21
         // a chunk keeps only those it makes of itself, and `drift` says
         // what is missing once the database runs a release that declares
-        // them. Quoted apart, as the table's name may hold `$$`.
+        // them.
         push(format!(
             "DO $ml$\nBEGIN\n    IF (regexp_match((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '^(\\d+)\\.(\\d+)'))::int[] >= ARRAY[2, 22] THEN\n        \
              EXECUTE {};\n    END IF;\nEND\n$ml$;",
@@ -334,6 +334,7 @@ fn own_sparse(sql: &str) -> &'static str {
                 | "float4"
                 | "double precision"
                 | "float8"
+                | "float"
                 | "boolean"
                 | "bool"
         );

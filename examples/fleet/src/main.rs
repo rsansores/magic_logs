@@ -172,6 +172,14 @@ async fn set_up(pool: &PgPool) -> Result<(), Error> {
         // The counts are the policies' to refresh, from now: until they
         // have, what is not counted yet is read from the rows.
     }
+    let no_positions: bool =
+        sqlx::query_scalar("SELECT NOT EXISTS (SELECT 1 FROM fleet.positions)")
+            .fetch_one(pool)
+            .await?;
+    if no_positions {
+        println!("seeding a week of positions…");
+        sqlx::raw_sql(POSITIONS).execute(pool).await?;
+    }
     Ok(())
 }
 
@@ -214,7 +222,10 @@ SELECT gen_random_uuid(), now() - interval '90 minutes' + random() * random() * 
                                       (1.0, 'tamper', 'critical', ': seal broken')) v(upto, kind, level, says)
                  WHERE v.upto > r.roll ORDER BY v.upto LIMIT 1) k;
 
-INSERT INTO fleet.positions
+";
+
+/// Where each truck was, every minute of a week.
+const POSITIONS: &str = "INSERT INTO fleet.positions
 SELECT gen_random_uuid(), t, 'truck-' || lpad(u::text, 2, '0'),
        (ARRAY['North', 'South', 'East', 'West', 'Harbor'])[1 + u % 5],
        19.4 + u / 100.0 + random() / 50, -99.1 + u / 100.0 + random() / 50,

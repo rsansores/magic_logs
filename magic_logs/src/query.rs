@@ -376,6 +376,13 @@ fn push_where(
             ("(SELECT ", ")")
         };
         match condition {
+            // One value is `=`, not `= ANY`: TimescaleDB before 2.31 consults
+            // a column's bloom filter only for the former.
+            Condition::AnyOf(values) if values.len() == 1 => {
+                qb.push(format!(" AND {} = {open}", ident(name)));
+                qb.push_bind(values[0].clone());
+                qb.push(format!("::{sql}{close}"));
+            }
             Condition::AnyOf(values) if !values.is_empty() => {
                 qb.push(format!(" AND {} = ANY({open}", ident(name)));
                 qb.push_bind(values.clone());

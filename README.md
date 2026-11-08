@@ -163,7 +163,7 @@ pub struct Reading {
 | field | `facet` | counted by hour and by day; `per_top` also per `top`; `indexed` (of a `facet` or a `filter`) gets an index of its own |
 | field | `top` | the entity counted on its own, by hour and by day: the grouped view's rows |
 | field | `filter` | a filter the counts do not keep: naming it reads the rows |
-| field | `minmax`, `bloom` | of a column a filter names: what a compressed batch keeps of it, so a filter skips the batches that cannot match — `minmax` its range, for ranges; `bloom` its values, for equality. Made on TimescaleDB 2.22.1 and later, beside those TimescaleDB would have made of each indexed column; those it would make for an index of yours are lost |
+| field | `minmax`, `bloom` | of a column a filter names: what a compressed batch keeps of it, so a filter skips the batches that cannot match — `minmax` its range, for ranges; `bloom` its values, for equality. Made on TimescaleDB 2.22.1 and later, beside those TimescaleDB would have made of each indexed column; those it makes of several columns of one index (the primary key's among them) and for an index of yours are lost. A bloom serves a filter of one value on every release, of several from 2.31 |
 | field | `search` | searched as text, every such column |
 | field | `sql = "…"` | the SQL type a filter's values are cast to, when the Rust type does not say (an enum) |
 
