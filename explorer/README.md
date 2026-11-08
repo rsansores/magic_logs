@@ -58,14 +58,14 @@ const answers = useLogFetch<MyEvent>(explorer, {
       </label>
     </LogFacet>
 
-    <LogHistogram :levels="['info', 'warning', 'error']" v-slot="{ geometry, brushed, handlers }">
+    <LogHistogram :stacks="['info', 'warning', 'error']" v-slot="{ geometry, brushed, handlers }">
       <!-- touch-action: none, or a finger scrolls the page instead of brushing -->
       <svg viewBox="0 0 1000 100" preserveAspectRatio="none" style="touch-action: none" v-bind="handlers">
         <template v-for="bar in geometry.bars" :key="bar.at">
           <rect
             v-for="s in bar.segments"
-            :key="s.level"
-            :class="s.level"
+            :key="s.stack"
+            :class="s.stack"
             :x="bar.x * 1000"
             :width="bar.width * 1000"
             :y="100 - s.y1 * 100"
@@ -87,16 +87,16 @@ const answers = useLogFetch<MyEvent>(explorer, {
 
 ## The pieces
 
-| Piece                                         | What it is                                                                                                                                                              |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `useLogExplorer(options)`                     | the state: `preset`, `from`, `to`, each field's chosen values, `search`, `live`, the page cursors; and from them `range`, `step` and the `question` every answer shares |
-| `memoryStore`, `urlStore()`, your own `Store` | where the state lives. A router's query: `(key, initial, codec) => useRouteState(key, initial, { codec })`                                                              |
-| `useLogFetch(explorer, fetchers)`             | asks the four questions with your functions, keeps each answer until the next arrives, drops an answer to a question no longer asked                                    |
-| `LogExplorerRoot`                             | hands the state and the answers to the parts inside it                                                                                                                  |
-| `LogHistogram` / `useHistogram`               | bars stacked by level, the scale's ticks, round instants, and pointer handlers that brush and zoom — all as fractions of the plot                                       |
-| `LogFacet` / `useFacet`                       | one field's values, largest first, each counted under every other field's filter, with `toggle`, `only`, `clear`                                                        |
-| `LogRows`, `LogGroups`                        | the rows read so far and whether there are more; the largest groups                                                                                                     |
-| `magic_logs_explorer/core`                    | the same arithmetic with no framework: `stack`, `fill`, `geometry`, `selection`, `stepFor`, `rangeOf`, `facetOf`, the codecs                                            |
+| Piece                                         | What it is                                                                                                                                                                                   |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useLogExplorer(options)`                     | the state: `preset`, `from`, `to`, each field's chosen values, each range's bounds, `search`, `live`, the page cursors; and from them `range`, `step` and the `question` every answer shares |
+| `memoryStore`, `urlStore()`, your own `Store` | where the state lives. A router's query: `(key, initial, codec) => useRouteState(key, initial, { codec })`                                                                                   |
+| `useLogFetch(explorer, fetchers)`             | asks the four questions with your functions, keeps each answer until the next arrives, drops an answer to a question no longer asked                                                         |
+| `LogExplorerRoot`                             | hands the state and the answers to the parts inside it                                                                                                                                       |
+| `LogHistogram` / `useHistogram`               | bars stacked by a field, the scale's ticks, round instants, and pointer handlers that brush and zoom — all as fractions of the plot                                                          |
+| `LogFacet` / `useFacet`                       | one field's values, largest first, each counted under every other field's filter, with `toggle`, `only`, `clear`                                                                             |
+| `LogRows`, `LogGroups`                        | the rows read so far and whether there are more; the largest groups                                                                                                                          |
+| `magic_logs_explorer/core`                    | the same arithmetic with no framework: `stack`, `fill`, `geometry`, `selection`, `stepFor`, `rangeOf`, `facetOf`, the codecs                                                                 |
 
 With vue-query (or anything like it), skip `useLogFetch`: key your queries
 on `explorer.question`, `explorer.step` and `explorer.asked` (it moves when
@@ -132,6 +132,12 @@ How it behaves:
   spans at most `longest` (about two years), a field's values pass its
   `accept`; anything else reads as the default (and `shown` says so). A value may hold a comma:
   it is written `\,`.
+- **A range is two bounds.** A field named in `ranges` holds `{ min?, max? }`,
+  stored as `min..max` with either side empty (`1000..`): the question
+  names it in `ranges` while it has a bound, and the server reads it as
+  magic_logs' `Condition::Between`. Its `accept` judges each bound, and a
+  dot that could read as the `..` is written `\.`: `1000.5..2000` is as
+  it looks.
 - **Steps**: minutes for a window of up to two hours, five minutes up to
   eight hours, hours up to four days, six hours up to twenty, days past that
   — where magic_logs answers from its daily counts.

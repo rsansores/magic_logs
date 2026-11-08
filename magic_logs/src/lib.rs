@@ -4,7 +4,7 @@
 //! A row type says, with `#[derive(MagicLog)]`, which column is its time,
 //! which its level, which its facets, its `top` and its scope.
 //! [`migration`] prints the SQL that makes the table a compressed hypertable
-//! counted by hour and by day, and per `top`; [`page`], [`histogram`],
+//! — counted by hour and by day, and per `top`, when it counts something; [`page`], [`histogram`],
 //! [`facets`] and [`grouped`] build the queries, each read from the cheapest
 //! table that answers it. Authorization is the host's: every relation is read
 //! through a view the host makes, in [`Spec::view_schema`].
@@ -73,17 +73,19 @@
 
 #![warn(missing_docs)]
 
+mod drift;
 mod migration;
 mod query;
 mod spec;
 
+pub use drift::{drift, Drift};
 pub use magic_logs_derive::MagicLog;
 pub use migration::{migration, Governed};
 pub use query::{
-    facets, grouped, histogram, histogram_tier, page, parts, Bucket, Cursor, FacetCount, Filter,
-    Group, Part,
+    facets, grouped, histogram, histogram_by, histogram_tier, page, parts, Bucket, Condition,
+    Cursor, FacetCount, Filter, Group, Part,
 };
-pub use spec::{Column, Field, MagicLog, Spec, Storage, Tier};
+pub use spec::{Column, Field, MagicLog, Sparse, Spec, Storage, Tier};
 
 /// What a filter or a question was refused for.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -110,4 +112,9 @@ pub enum Error {
     /// `grouped` asked of a table with no `#[log(top)]`.
     #[error("the table has no `top` to group by")]
     NoTop,
+    /// A value no row of the field can hold: a bit string of another length
+    /// than a `bit(n)`'s, longer than a `varbit(n)`'s, or more than one
+    /// byte for a `"char"`. Cast, it would be cut or padded into another.
+    #[error("`{1}` cannot be a value of `{0}`")]
+    DoesNotFit(String, String),
 }

@@ -35,13 +35,13 @@ export interface Histogram {
   zoomTo(bar: Bar): void
 }
 
-/** The histogram of `buckets`, stacked by `levels`, drawn on the window and
+/** The histogram of `buckets`, stacked in the order of `stacks`, drawn on the window and
  * step they answer (`answered`, as `useLogFetch` keeps them) — the
  * explorer's own when left out — and brushed to zoom the explorer. */
 export function useHistogram(
   explorer: MaybeRefOrGetter<LogExplorer>,
   buckets: MaybeRefOrGetter<readonly Bucket[]>,
-  levels: MaybeRefOrGetter<readonly string[] | undefined> = undefined,
+  stacks: MaybeRefOrGetter<readonly string[] | undefined> = undefined,
   answered: MaybeRefOrGetter<Answered | null | undefined> = undefined,
 ): Histogram {
   const on = computed<Answered>(() => {
@@ -49,7 +49,7 @@ export function useHistogram(
     return toValue(answered) ?? { range: e.range.value, step: e.step.value }
   })
   const drawn = computed(() =>
-    geometry(toValue(buckets), on.value.range, on.value.step.ms, toValue(levels) ?? []),
+    geometry(toValue(buckets), on.value.range, on.value.step.ms, toValue(stacks) ?? []),
   )
   // A brush is held to the plot it began on: an answer that lands while
   // the pointer is down redraws the bars, not what the brush selects.

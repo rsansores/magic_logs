@@ -26,7 +26,11 @@ export function facetOf(
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
 }
 
-/** Whether `question` narrows its window: a value chosen, or a search. */
+/** Whether `question` narrows its window: a value chosen, a range, or a search. */
 export function narrowed(question: Question): boolean {
-  return Object.values(question.fields).some((v) => v.length > 0) || !!question.search
+  return (
+    Object.values(question.fields).some((v) => v.length > 0) ||
+    Object.values(question.ranges ?? {}).some((b) => !!(b.min || b.max)) ||
+    !!question.search
+  )
 }

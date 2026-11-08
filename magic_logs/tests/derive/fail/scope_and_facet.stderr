@@ -1,0 +1,5 @@
+error: the tenant and the scope are kept in every count: not also a `facet`
+  --> tests/derive/fail/scope_and_facet.rs:12:9
+   |
+12 |     pub zone: String,
+   |         ^^^^

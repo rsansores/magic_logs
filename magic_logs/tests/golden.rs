@@ -3,7 +3,10 @@
 //! runs, read in review as SQL. `MAGIC_LOGS_BLESS=1` writes them anew.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use magic_logs::{facets, grouped, histogram, migration, page, Cursor, Filter, Governed, MagicLog};
+use magic_logs::{
+    facets, grouped, histogram, histogram_by, migration, page, Condition, Cursor, Filter, Governed,
+    MagicLog,
+};
 use uuid::Uuid;
 
 #[derive(MagicLog)]
@@ -11,7 +14,7 @@ use uuid::Uuid;
     name = "events",
     schema = "telemetry",
     view_schema = "api",
-    segment_by = "unit_id",
+    segment_by = "unit_id, kind",
     search_with = "f_unaccent"
 )]
 struct Event {
@@ -31,6 +34,10 @@ struct Event {
     unit_id: Uuid,
     #[log(filter)]
     operator_id: Option<Uuid>,
+    #[log(filter, minmax)]
+    volume: Option<f64>,
+    #[log(filter, bloom)]
+    serial: Option<String>,
     #[log(search)]
     description: String,
 }
@@ -47,6 +54,8 @@ fn columns(e: Event) -> impl std::fmt::Debug {
         e.kind,
         e.unit_id,
         e.operator_id,
+        e.volume,
+        e.serial,
         e.description,
     )
 }
@@ -147,6 +156,62 @@ fn queries() -> String {
         .to_owned(),
     );
     add(
+        "page narrowed to a range of a field the counts do not keep: the rows",
+        page(
+            &spec,
+            &week.clone().with_condition(
+                "volume",
+                Condition::Between {
+                    min: Some("1000".into()),
+                    max: None,
+                },
+            ),
+            None,
+            100,
+        )
+        .unwrap()
+        .sql()
+        .to_owned(),
+    );
+    add(
+        "histogram by day, a range of a counted field: the daily counts",
+        histogram(
+            &spec,
+            &week.clone().with_condition(
+                "kind",
+                Condition::Between {
+                    min: Some("a".into()),
+                    max: Some("m".into()),
+                },
+            ),
+            Duration::days(1),
+        )
+        .unwrap()
+        .sql()
+        .to_owned(),
+    );
+    add(
+        "histogram by day stacked by another counted field: the daily counts",
+        histogram_by(&spec, &week, Duration::days(1), Some("kind"))
+            .unwrap()
+            .sql()
+            .to_owned(),
+    );
+    add(
+        "histogram by day stacked by a field the counts do not keep: the rows",
+        histogram_by(&spec, &week, Duration::days(1), Some("operator_id"))
+            .unwrap()
+            .sql()
+            .to_owned(),
+    );
+    add(
+        "histogram by day stacked by nothing: the daily counts",
+        histogram_by(&spec, &week, Duration::days(1), None)
+            .unwrap()
+            .sql()
+            .to_owned(),
+    );
+    add(
         "facets over a week, each under the others' filters",
         facets(
             &spec,
@@ -216,7 +281,8 @@ fn the_migration_is_the_one_checked_in() {
     golden("migration.sql", &migration(&Event::SPEC, govern));
 }
 
-/// A table of a time and an id: counted by its rows alone.
+/// A table of a time and an id: it counts nothing, so it is stored as its
+/// rows alone, with no counts.
 #[derive(MagicLog)]
 #[log(name = "pings", schema = "telemetry")]
 struct Ping {
@@ -227,7 +293,7 @@ struct Ping {
 }
 
 #[test]
-fn the_migration_of_a_table_that_counts_only_its_rows_is_the_one_checked_in() {
+fn the_migration_of_a_table_that_counts_nothing_is_the_one_checked_in() {
     let _ = |p: Ping| (p.id, p.at);
     golden("migration_minimal.sql", &migration(&Ping::SPEC, govern));
 }
@@ -235,4 +301,118 @@ fn the_migration_of_a_table_that_counts_only_its_rows_is_the_one_checked_in() {
 #[test]
 fn every_question_is_the_sql_checked_in() {
     golden("queries.sql", &queries());
+}
+
+/// A sparse index of another column keeps the ones TimescaleDB makes of each
+/// indexed column — a `minmax` of a time, a bloom of any other — but never
+/// of the id or the time, which order every batch.
+#[derive(MagicLog)]
+#[log(name = "marks", schema = "telemetry")]
+struct Mark {
+    #[log(id, filter, indexed)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, indexed)]
+    seen_at: Option<DateTime<Utc>>,
+    #[log(filter, indexed)]
+    unit_id: Option<Uuid>,
+    #[log(filter, minmax)]
+    volume: Option<f64>,
+}
+
+#[test]
+fn a_declared_sparse_index_keeps_timescaledbs_own_but_the_ids() {
+    let _ = |m: Mark| (m.id, m.at, m.seen_at, m.unit_id, m.volume);
+    let sql = migration(&Mark::SPEC, govern);
+    assert!(
+        sql.contains(r#"minmax("volume"), minmax("seen_at"), bloom("unit_id")"#),
+        "{sql}"
+    );
+    assert!(!sql.contains(r#"("id")"#), "{sql}");
+}
+
+/// A `char(n)` filter compares with its value whole, cast to `bpchar`, not
+/// cut to `n`; a `bit(n)` keeps its type, and a value of another length is
+/// refused before the cast could cut or pad it.
+#[derive(MagicLog)]
+#[log(name = "codes", schema = "telemetry")]
+struct Code {
+    #[log(id)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, sql = "char(3)")]
+    code: String,
+    #[log(filter, sql = "bit(3)")]
+    flags: String,
+    #[log(filter, sql = "varbit(4)")]
+    mask: String,
+}
+
+#[test]
+fn a_bounded_character_or_bit_value_is_compared_whole() {
+    let _ = |c: Code| (c.id, c.at, c.code, c.flags, c.mask);
+    let window = || Filter::new(day(), day() + Duration::days(1));
+    let filter = window()
+        .with("code", ["abcd"])
+        .with("flags", ["101", "011"]);
+    let sql = page(&Code::SPEC, &filter, None, 10)
+        .unwrap()
+        .sql()
+        .to_owned();
+    assert!(sql.contains(r#""code" = $3::bpchar"#), "{sql}");
+    assert!(sql.contains(r#""flags" = ANY($4::bit(3)[])"#), "{sql}");
+    for (field, value) in [
+        ("flags", "1011"),
+        ("flags", "1"),
+        ("flags", "b1011"),
+        ("flags", "x1"),
+        ("mask", "10101"),
+        ("mask", "xFF"),
+    ] {
+        assert_eq!(
+            page(&Code::SPEC, &window().with(field, [value]), None, 10).err(),
+            Some(magic_logs::Error::DoesNotFit(field.into(), value.into())),
+        );
+    }
+    for (field, value) in [
+        ("mask", "10"),
+        ("mask", "b1111"),
+        ("mask", "xF"),
+        ("flags", "b101"),
+    ] {
+        assert!(
+            page(&Code::SPEC, &window().with(field, [value]), None, 10).is_ok(),
+            "{value}"
+        );
+    }
+}
+
+/// A type whose name only begins like a built-in one is cast to itself.
+#[derive(MagicLog)]
+#[log(name = "units", schema = "telemetry")]
+struct Unit {
+    #[log(id)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, sql = "interval_unit")]
+    unit: String,
+    #[log(filter, sql = "timestamp_kind")]
+    stamp: String,
+}
+
+#[test]
+fn a_type_named_like_a_built_in_one_is_cast_to_itself() {
+    let _ = |u: Unit| (u.id, u.at, u.unit, u.stamp);
+    let filter = Filter::new(day(), day() + Duration::days(1))
+        .with("unit", ["hours"])
+        .with("stamp", ["x"]);
+    let sql = page(&Unit::SPEC, &filter, None, 10)
+        .unwrap()
+        .sql()
+        .to_owned();
+    assert!(sql.contains("$3::interval_unit"), "{sql}");
+    assert!(sql.contains("$4::timestamp_kind"), "{sql}");
 }

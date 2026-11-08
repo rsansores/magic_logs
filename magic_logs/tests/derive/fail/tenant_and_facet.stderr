@@ -1,0 +1,5 @@
+error: the tenant and the scope are kept in every count: not also a `facet`
+  --> tests/derive/fail/tenant_and_facet.rs:13:9
+   |
+13 |     pub tenant_id: Uuid,
+   |         ^^^^^^^^^

@@ -23,6 +23,30 @@ A chunk older than `compress_after` (two days) is compressed into the
 columnstore, ordered by `time DESC, id DESC` and segmented by `segment_by`
 (the entity most pages narrow to): about twelve to one on the first host's
 events, and a compressed chunk is read in that order without sorting.
+`segment_by` may name several columns: a segment then holds one value of
+each, and a filter on any of them skips the segments that hold another
+without decompressing them. A table whose rows are of several kinds, most
+questions asking about one, segments by the kind too (see
+[what it costs](#ranges-sparse-indexes-and-segments)).
+
+A field's `minmax` or `bloom` is its sparse index: per batch of a
+compressed chunk (a thousand rows of a segment), its least and greatest
+value, or a bloom filter of its values. A filter on the field skips the
+batches that cannot hold a match: a bloom serves a filter of one value on
+every release, and of several (`= ANY`) from 2.31. The migration declares
+them from 2.22.1 on; on 2.21 the migration leaves them out, and a chunk keeps
+only those TimescaleDB makes of itself, for a column with an index.
+
+Declaring any replaces those TimescaleDB makes of itself for indexed
+columns, so the migration declares them too: a `minmax` of an indexed time,
+date, `numeric`, `smallint`, float, boolean, `money`, bit string, text
+search type or `"char"`, a bloom of any other. What is
+lost is what it makes for an index of the host's own, and the blooms it
+makes of several columns of one index, the primary key's among them.
+
+A table that counts nothing — no `level`, no `facet`, no `top` — stops
+here: the hypertable, its indexes and its columnstore, read through its
+view. It has no counts, and every question reads its rows.
 
 Continuous aggregates — the counts — read it, two families of two:
 
@@ -78,15 +102,20 @@ watermark is counted at once (real-time aggregation).
 
 ## Which question reads what
 
-A question names a window, values of some fields, and maybe a search. A
-search, or a field no count keeps (a `filter`), reads the rows. Otherwise
+A question names a window, what some fields must be — one of some values,
+or between two bounds — and maybe a search. A search, or a field no count
+keeps (a `filter`), reads the rows. A range of a counted field is answered
+by the counts like its values are: a count keeps the field's value, so
+`kind BETWEEN a AND m` is the same condition on either. Otherwise
 the counts answer, from the family that keeps every field named: the
 hourly and daily counts, or — when the question names the `top`, or
 groups by it — those per `top`.
 
 - A **histogram** (`histogram_tier`) reads the daily counts for a step of
   whole days, the hourly ones for whole hours, and the rows for a finer
-  step. It counts every bucket of its step the window touches, whole:
+  step. Its bars are stacked by a field: the table's `stack`, or its
+  `level`, or any field a question names (`histogram_by`); a stack no count
+  keeps reads the rows, as a filter on it would. It counts every bucket of its step the window touches, whole:
   `[time_bucket(step, from), time_bucket(step, to − 1µs) + step)`, the same
   bounds on the counts and on the rows, so each bar is exactly its
   bucket's count whichever it reads.
@@ -210,6 +239,64 @@ Before the indexes above, a page of a month took 5–9 s: the newest chunk
 had only TimescaleDB's default `(time DESC)` index, and the compressed
 chunks were ordered by id, so every page sorted ten million rows.
 
+### Ranges, sparse indexes and segments
+
+The second host's activity table, 2026-11-07: 312 million rows over 30
+days, 10.4 million a day — events (96 %), movements (3.8 %, 400,000 a day)
+and shift summaries — on the same container as above. A movement's values
+are typed columns (`movement_volume NUMERIC(15,3)`, `movement_folio
+BIGINT`, a reception unit's `uuid`), each `filter`; reads as a reader of
+all, then of one district, 7 days, milliseconds.
+
+| question about movements | segment_by the equipment | and the kind | and sparse indexes |
+|---|---|---|---|
+| a page, folio = one value | 53 / 399 | 46 / 204 | 48 / 188 |
+| a page, volume 5,000–5,010 | 1,473 / 1,479 | 355 / 335 | 256 / 260 |
+| histogram, volume ≥ 1,000 | 375 / 362 | 501 / 418 | 505 / 418 |
+| facets, one reception unit | 1,380 / 1,374 | 425 / 398 | 414 / 409 |
+| the same three pages, ten days of compressed history | 266 / 294 / 3,308 | 36 / 64 / 256 | 21 / 3 / 110 |
+
+- **Segment by what most questions narrow to.** Segmented by the
+  equipment alone, every compressed batch mixed events with movements, and
+  a question about movements decompressed all 10.4 million rows of a day to
+  find 400,000. With the kind in `segment_by`, it skips the events'
+  segments: three to fifteen times faster, and the table 8 % smaller.
+- **A sparse index is cheap and helps selective filters.** `minmax` on the
+  volume and the folio and `bloom` on the reception unit halved what was
+  left in compressed history. It does nothing for the two uncompressed
+  days, which their indexes serve.
+- **What vectorizes.** On 2.31 a filter on a compressed `bigint`,
+  `double precision` or `text` (equality) column runs vectorized; on a
+  `NUMERIC` column it does not, though its `minmax` still skips batches.
+  An expression over a JSONB column gets neither: the same values kept in
+  one JSONB column instead of columns ran 1.5 to 8 times slower.
+- **A filter matching most rows reads them.** "Volume ≥ 1,000" holds for
+  two movements in three: its histogram over 7 days reads 2.8 million rows,
+  about half a second whatever the storage, and over 30 days about two.
+  No count keeps a range of a field it does not count.
+- **Facets are one `GROUP BY` per field, under `UNION ALL`.** The same
+  counts as one `GROUP BY GROUPING SETS` read every chunk of the table, not
+  the window's: on 2.31 grouping sets lose chunk exclusion (55 s instead
+  of 2.2 s).
+- **Bound what reads a compressed hypertable by a value, not a subquery.**
+  The rows before and after one row, on its equipment, took 2.3 s with the
+  equipment read in a subquery and 1.2 ms with it passed as a value:
+  TimescaleDB skips segments by a constant, not by what a subquery answers.
+
+## Drift
+
+A released migration file is never edited, so a test that compares the
+migration's SQL with a file holds only until the first release. `drift`
+asks the database instead: the hypertable's time column and chunk, its
+columnstore's segments, order, sparse indexes and policy, every index the
+migration makes, each count's columns, refresh, chunks and columnstore, a
+count the table should not have, and a view of every relation. One
+`Drift` for each difference; none for a table as declared. An index or a
+view of the host's beyond these is not a difference, and what a view reads
+is the host's. A host runs it in a test, against a database its migrations
+made: the declaration changes with a new migration, and the test says
+whether that migration did what the declaration now says.
+
 ## Operating it
 
 What an operator meets, at the first host's volume (10 million rows a
@@ -227,6 +314,9 @@ day):
   its unfinished batch short until the policy's next run or two count
   them again. On 2.22.0 they stayed short for good, which is why the
   migration refuses it.
+- **Retuning a refresh** with `alter_job` is refused on 2.22 and 2.23 for
+  a daily count (`multiple refresh policies are not supported for
+  hierarchical continuous aggregates`); 2.21 and 2.24 or later take it.
 - **Retention.** The counts are refreshed over all of history, so a
   refresh after `drop_chunks` on the rows recounts the dropped days from
   nothing: their counts are gone too. Drop rows and counts together
@@ -242,5 +332,8 @@ day):
   re-send on reconnect does well to drop what it already holds before
   inserting.
 - **Upgrading TimescaleDB** (`ALTER EXTENSION timescaledb UPDATE`) keeps
-  the policies and their settings, and the counts as they were.
+  the policies and their settings, and the counts as they were. A table
+  migrated on 2.21 has no declared sparse indexes; on 2.22.1 or later,
+  `drift` names them, and `ALTER TABLE … SET (timescaledb.sparse_index =
+  …)` declares them for the chunks compressed from then on.
 

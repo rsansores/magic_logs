@@ -10,24 +10,49 @@ use crate::migration::{ident, qualified};
 use crate::spec::{Spec, Tier};
 use crate::Error;
 
-/// What an explorer is looking at: a window of time and the values each
-/// named field may take (any of them; every field must match).
+/// What an explorer is looking at: a window of time and what each named
+/// field's value must be (every field must match).
 #[derive(Debug, Clone)]
 pub struct Filter {
     /// Where the window begins, inclusive.
     pub from: DateTime<Utc>,
     /// Where it ends, exclusive.
     pub to: DateTime<Utc>,
-    /// `(field, values)`: the row's value of `field` is one of `values`,
-    /// written as SQL reads the field's type from text — the database casts
-    /// them, and refuses one that does not read with a data exception
-    /// (SQLSTATE class `22`: `22P02`, `22003`, `22007`, …). An empty list
-    /// leaves the field unfiltered. The rows without a value (`NULL`), which
-    /// a facet counts as `None`, are not selectable.
-    pub fields: Vec<(String, Vec<String>)>,
+    /// `(field, condition)`: the row's value of `field` meets `condition`.
+    /// The rows without a value (`NULL`), which a facet counts as `None`, meet
+    /// none.
+    pub fields: Vec<(String, Condition)>,
     /// Words the searched columns contain, every one, in any order and in
     /// any of the columns: `%`, `_` and `\\` are themselves, not patterns.
     pub search: Option<String>,
+}
+
+/// What a field's value must be. Every value is written as SQL reads the
+/// field's type from text: the database casts it, and refuses one that does
+/// not read with a data exception (SQLSTATE class `22`: `22P02`, `22003`,
+/// `22007`, …).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Condition {
+    /// One of these values. None at all leaves the field unfiltered.
+    AnyOf(Vec<String>),
+    /// No less than `min` and no more than `max`, each when given, in the
+    /// order of the field's type. Neither leaves the field unfiltered.
+    Between {
+        /// The least value, inclusive.
+        min: Option<String>,
+        /// The greatest value, inclusive.
+        max: Option<String>,
+    },
+}
+
+impl Condition {
+    /// Whether it leaves out any row.
+    fn narrows(&self) -> bool {
+        match self {
+            Condition::AnyOf(values) => !values.is_empty(),
+            Condition::Between { min, max } => min.is_some() || max.is_some(),
+        }
+    }
 }
 
 impl Filter {
@@ -43,15 +68,16 @@ impl Filter {
 
     /// The rows whose `field` is one of `values`; an empty `values` leaves
     /// the field unfiltered.
-    pub fn with(
-        mut self,
-        field: &str,
-        values: impl IntoIterator<Item = impl Into<String>>,
-    ) -> Self {
-        self.fields.push((
-            field.to_owned(),
-            values.into_iter().map(Into::into).collect(),
-        ));
+    pub fn with(self, field: &str, values: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.with_condition(
+            field,
+            Condition::AnyOf(values.into_iter().map(Into::into).collect()),
+        )
+    }
+
+    /// The rows whose `field` meets `condition`.
+    pub fn with_condition(mut self, field: &str, condition: Condition) -> Self {
+        self.fields.push((field.to_owned(), condition));
         self
     }
 
@@ -69,9 +95,16 @@ impl Filter {
         if self.to <= self.from {
             return Err(Error::Window);
         }
-        for (i, (name, _)) in self.fields.iter().enumerate() {
-            if spec.field(name).is_none() {
+        for (i, (name, condition)) in self.fields.iter().enumerate() {
+            let Some(field) = spec.field(name) else {
                 return Err(Error::UnknownField(name.clone()));
+            };
+            let values: Vec<&String> = match condition {
+                Condition::AnyOf(values) => values.iter().collect(),
+                Condition::Between { min, max } => min.iter().chain(max.iter()).collect(),
+            };
+            if let Some(v) = values.into_iter().find(|v| !fits(field.column.sql, v)) {
+                return Err(Error::DoesNotFit(name.clone(), v.clone()));
             }
             if self.fields[..i].iter().any(|(n, _)| n == name) {
                 return Err(Error::FieldTwice(name.clone()));
@@ -91,7 +124,7 @@ impl Filter {
     fn named(&self) -> impl Iterator<Item = &str> {
         self.fields
             .iter()
-            .filter(|(_, values)| !values.is_empty())
+            .filter(|(_, condition)| condition.narrows())
             .map(|(name, _)| name.as_str())
     }
 }
@@ -105,16 +138,17 @@ pub struct Cursor {
     pub id: String,
 }
 
-/// One bar of the histogram: the rows of `level` in the bucket that begins
-/// at `bucket`.
+/// One bar of the histogram: the rows holding `stack` in the bucket that
+/// begins at `bucket`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "BucketRow"))]
 pub struct Bucket {
     /// Where the bucket begins.
     pub bucket: DateTime<Utc>,
-    /// The level, as text; `None` for rows without one, or a table with no level.
-    pub level: Option<String>,
+    /// The value of the field the histogram is stacked by, as text; `None`
+    /// for rows without one, or a histogram stacked by nothing.
+    pub stack: Option<String>,
     /// How many rows.
     pub count: i64,
 }
@@ -171,7 +205,7 @@ enum Family {
 }
 
 fn family(spec: &Spec, filter: &Filter, also: &[&str], per_top: bool) -> Option<Family> {
-    if filter.searched().is_some() {
+    if filter.searched().is_some() || !spec.counts() {
         return None;
     }
     let kept_in = |tier| {
@@ -217,16 +251,17 @@ fn ceil(t: DateTime<Utc>, unit: i64) -> DateTime<Utc> {
     }
 }
 
-/// The table a histogram of `filter` in buckets of `step` reads: the daily
-/// counts for a step of whole days, the hourly ones for whole hours — per
-/// `top` when the filter names the `top` — and the rows for a finer step, a
-/// search, or a field no count keeps. Each bar counts its bucket whole,
-/// whichever it reads.
-pub fn histogram_tier(spec: &Spec, filter: &Filter, step: Duration) -> Tier {
+/// The table a histogram of `filter` in buckets of `step`, stacked by
+/// `stack`, reads: the daily counts for a step of whole days, the hourly ones
+/// for whole hours — per `top` when the filter names the `top` — and the rows
+/// for a finer step, a search, or a field no count keeps. Each bar counts its
+/// bucket whole, whichever it reads.
+pub fn histogram_tier(spec: &Spec, filter: &Filter, step: Duration, stack: Option<&str>) -> Tier {
     let micros = step.num_microseconds().unwrap_or(i64::MAX);
     let whole = |unit: i64| micros >= unit && micros % unit == 0;
     let daily = whole(DAY);
-    match family(spec, filter, &[], false) {
+    let also: Vec<&str> = stack.into_iter().collect();
+    match family(spec, filter, &also, false) {
         _ if !whole(HOUR) => Tier::Raw,
         Some(Family::Counted) if daily => Tier::Daily,
         Some(Family::Counted) => Tier::Hourly,
@@ -328,20 +363,54 @@ fn push_where(
         qb.push(format!(" AND {at} < "));
         qb.push_bind(to);
     }
-    for (name, values) in &filter.fields {
-        if values.is_empty() {
-            continue;
-        }
+    for (name, condition) in &filter.fields {
         let Some(field) = spec.field(name) else {
             continue;
         };
-        // The values are cast once, in an InitPlan: a cast from text that is
-        // not immutable (to a timestamp) is no constant to TimescaleDB's
-        // filter on compressed chunks, which then refuses it.
-        let sql = field.column.sql;
-        qb.push(format!(" AND {} = ANY((SELECT ", ident(name)));
-        qb.push_bind(values.clone());
-        qb.push(format!("::{sql}[])::{sql}[])"));
+        // A cast from text that is not immutable (to a timestamp, an enum) is
+        // no constant to TimescaleDB's filter on compressed chunks, which then
+        // refuses it: such values are cast once, in an InitPlan. One that is
+        // (a number, text, a uuid) is cast in place, which lets the filter
+        // run vectorized on compressed batches where its type does (not a
+        // `numeric`); an InitPlan's value never does.
+        // Cast to the bare type: a typmod would round a bound (`numeric(15,3)`)
+        // or cut a value short (`varchar(3)`) before it is compared.
+        let bare = bare_type(field.column.sql);
+        let sql = bare.as_str();
+        let (open, close) = if immutable_input(sql) {
+            ("", "")
+        } else {
+            ("(SELECT ", ")")
+        };
+        match condition {
+            // One value is `=`, not `= ANY`: TimescaleDB before 2.31 consults
+            // a column's bloom filter only for the former.
+            Condition::AnyOf(values) if values.len() == 1 => {
+                qb.push(format!(" AND {} = {open}", ident(name)));
+                qb.push_bind(values[0].clone());
+                qb.push(format!("::{sql}{close}"));
+            }
+            Condition::AnyOf(values) if !values.is_empty() => {
+                qb.push(format!(" AND {} = ANY({open}", ident(name)));
+                qb.push_bind(values.clone());
+                let cast = if close.is_empty() {
+                    format!("::{sql}[]")
+                } else {
+                    format!("::{sql}[])::{sql}[]")
+                };
+                qb.push(format!("{cast})"));
+            }
+            Condition::AnyOf(_) => {}
+            Condition::Between { min, max } => {
+                for (bound, op) in [(min, ">="), (max, "<=")] {
+                    if let Some(value) = bound {
+                        qb.push(format!(" AND {} {op} {open}", ident(name)));
+                        qb.push_bind(value.clone());
+                        qb.push(format!("::{sql}{close}"));
+                    }
+                }
+            }
+        }
     }
     if let (Some(text), Tier::Raw) = (filter.searched(), tier) {
         let wrap = |s: String| match spec.search_with {
@@ -411,21 +480,37 @@ pub fn page(
     Ok(qb)
 }
 
-/// The histogram of `filter` in buckets of `step`, stacked by level: rows
-/// of [`Bucket`].
+/// The histogram of `filter` in buckets of `step`, stacked by the table's
+/// stack — `stack = "…"`, or its `level` — when it has one: rows of
+/// [`Bucket`].
 pub fn histogram(
     spec: &Spec,
     filter: &Filter,
     step: Duration,
+) -> Result<QueryBuilder<'static, Postgres>, Error> {
+    histogram_by(spec, filter, step, spec.stack.map(|c| c.name))
+}
+
+/// The histogram of `filter` in buckets of `step`, stacked by the field
+/// `stack`, or by nothing: rows of [`Bucket`]. Read from the counts when they
+/// keep the field, from the rows otherwise.
+pub fn histogram_by(
+    spec: &Spec,
+    filter: &Filter,
+    step: Duration,
+    stack: Option<&str>,
 ) -> Result<QueryBuilder<'static, Postgres>, Error> {
     filter.check(spec)?;
     // A step is whole microseconds, as PostgreSQL's intervals are.
     if step < Duration::microseconds(1) || step.subsec_nanos() % 1_000 != 0 {
         return Err(Error::Step);
     }
-    let tier = histogram_tier(spec, filter, step);
-    let level = spec.level.map_or("NULL::text".to_owned(), |l| {
-        format!("{}::text", ident(l.name))
+    if let Some(name) = stack.filter(|n| spec.field(n).is_none()) {
+        return Err(Error::UnknownField(name.to_owned()));
+    }
+    let tier = histogram_tier(spec, filter, step, stack);
+    let stacked = stack.map_or("NULL::text".to_owned(), |name| {
+        format!("{}::text", ident(name))
     });
     let (at, count) = match tier {
         Tier::Raw => (ident(spec.time), "count(*)"),
@@ -434,7 +519,7 @@ pub fn histogram(
     let mut qb = QueryBuilder::new("SELECT time_bucket(");
     qb.push_bind(step_interval(step));
     qb.push(format!(
-        ", {at}) AS bucket, {level} AS level, {count} AS count FROM {}",
+        ", {at}) AS bucket, {stacked} AS stack, {count} AS count FROM {}",
         source(spec, tier)
     ));
     push_where(&mut qb, spec, filter, tier, Bounds::Buckets(step));
@@ -551,6 +636,134 @@ pub fn grouped(
     Ok(qb)
 }
 
+/// `sql` as a type that holds any value of it, so a cast cuts and rounds
+/// nothing: without its typmods (`numeric(15,3)` is `numeric`, `varchar(3)`
+/// `varchar`, `timestamp(3) with time zone` `timestamp with time zone`, an
+/// `interval day` an `interval`), and `char(n)` as `bpchar` — bare, it holds
+/// one character. Any other is left as it is: a `bit(n)` value of another
+/// length is refused before ([`Filter::check`]), as the cast would cut it.
+fn bare_type(sql: &str) -> String {
+    let stripped = strip_typmods(sql);
+    let lower = stripped.to_ascii_lowercase();
+    let base = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    match base {
+        // Bare, these are one character or one bit: their unbounded kin.
+        "char" | "character" | "bpchar" | "nchar" | "national character" => "bpchar".to_owned(),
+        "numeric"
+        | "decimal"
+        | "varchar"
+        | "character varying"
+        | "char varying"
+        | "national character varying"
+        | "nchar varying" => stripped,
+        _ if is_type(base, "interval") => "interval".to_owned(),
+        "timestamptz" | "timetz" => stripped,
+        _ if is_type(base, "timestamp") || is_type(base, "time") => stripped,
+        _ => sql.to_owned(),
+    }
+}
+
+fn strip_typmods(sql: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0;
+    for c in sql.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether `base` is the built-in type `name`, bare or followed by what
+/// spells it (`time with time zone`, `interval day`), not a type of another
+/// name that begins alike (`interval_unit`).
+pub(crate) fn is_type(base: &str, name: &str) -> bool {
+    base == name
+        || base
+            .strip_prefix(name)
+            .is_some_and(|rest| rest.starts_with(' '))
+}
+
+/// Whether `value` is a value of `sql` whole, for the types whose cast from
+/// text cuts or pads instead of refusing: a `bit(n)` holds `n` bits, a
+/// `varbit(n)` up to `n`, a `"char"` one byte. Any other type is the
+/// database's to judge.
+fn fits(sql: &str, value: &str) -> bool {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let length = |prefix: &str| -> Option<usize> {
+        bare.strip_prefix(prefix)?
+            .trim()
+            .strip_prefix('(')?
+            .strip_suffix(')')?
+            .trim()
+            .parse()
+            .ok()
+    };
+    if bare == "\"char\"" {
+        // One byte, or one written as an octal escape (`\101`).
+        let octal = value.len() == 4
+            && value.starts_with('\\')
+            && (b'0'..=b'3').contains(&value.as_bytes()[1])
+            && value[2..].bytes().all(|b| (b'0'..=b'7').contains(&b));
+        return value.len() <= 1 || octal;
+    }
+    // As the bit input reads it: binary after `b`, four bits a digit after
+    // `x`, binary otherwise.
+    let bits = || match value.as_bytes().first() {
+        Some(b'b' | b'B') => value.len() - 1,
+        Some(b'x' | b'X') => 4 * (value.len() - 1),
+        _ => value.len(),
+    };
+    if let Some(n) = length("varbit").or_else(|| length("bit varying")) {
+        return bits() <= n;
+    }
+    if bare == "bit" {
+        return bits() == 1;
+    }
+    match length("bit") {
+        Some(n) => bits() == n,
+        None => true,
+    }
+}
+
+/// Whether text is read as `sql` the same way whatever the session's
+/// settings: a number, text, a uuid, a boolean. A timestamp reads by the
+/// time zone and the date style, an enum by its catalog: not.
+fn immutable_input(sql: &str) -> bool {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let bare = bare.split('(').next().unwrap_or(bare).trim();
+    matches!(
+        bare,
+        "smallint"
+            | "integer"
+            | "int"
+            | "bigint"
+            | "int2"
+            | "int4"
+            | "int8"
+            | "numeric"
+            | "decimal"
+            | "real"
+            | "double precision"
+            | "float4"
+            | "float8"
+            | "text"
+            | "varchar"
+            | "character varying"
+            | "bpchar"
+            | "bit"
+            | "varbit"
+            | "uuid"
+            | "boolean"
+            | "bool"
+    )
+}
+
 /// How a stretch counts its rows: one by one, or by the counts' sums.
 fn counted(tier: Tier) -> &'static str {
     match tier {
@@ -583,7 +796,7 @@ mod json {
         let at = Utc.with_ymd_and_hms(2026, 10, 1, 6, 0, 0).unwrap();
         let bucket = Bucket {
             bucket: at,
-            level: Some("warning".into()),
+            stack: Some("warning".into()),
             count: 3,
         };
         let facet = FacetCount {
@@ -601,7 +814,7 @@ mod json {
         assert_eq!(
             serde_json::to_value((bucket, facet, group)).unwrap(),
             serde_json::json!([
-                { "bucket": "2026-10-01T06:00:00Z", "level": "warning", "count": 3 },
+                { "bucket": "2026-10-01T06:00:00Z", "stack": "warning", "count": 3 },
                 { "field": "kind", "value": null, "count": 2 },
                 { "top": "u1", "value": "door", "count": 5,
                   "first_at": "2026-10-01T06:00:00Z", "last_at": null }

@@ -4,9 +4,12 @@
 
 export type { BucketRow, FacetCountRow, GroupRow } from './rows.js'
 
+import type { Bounds } from '../codec.js'
+
 /** What every question shares: the window, each field's chosen values (any
- * of them; every field must match) and the search. A host turns it into its
- * request; its server turns that into a `magic_logs::Filter`. */
+ * of them; every field must match), each range's bounds and the search. A
+ * host turns it into its request; its server turns that into a
+ * `magic_logs::Filter`, a range into a `Condition::Between`. */
 export interface Question {
   /** RFC 3339, inclusive. */
   from: string
@@ -14,6 +17,9 @@ export interface Question {
   to: string
   /** Only fields with a value chosen are named. */
   fields: Record<string, string[]>
+  /** Each field held between two bounds; only those with a bound are named,
+   * and only when there is one. */
+  ranges?: Record<string, Bounds>
   search?: string
 }
 

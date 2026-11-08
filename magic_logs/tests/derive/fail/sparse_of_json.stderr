@@ -1,0 +1,5 @@
+error: `json` has no order and no hash: no sparse index can be made of it
+  --> tests/derive/fail/sparse_of_json.rs:12:9
+   |
+12 |     pub payload: String,
+   |         ^^^^^^^

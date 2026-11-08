@@ -4,8 +4,8 @@
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use magic_logs::{
-    facets, grouped, histogram, migration, page, Bucket, Cursor, FacetCount, Filter, Governed,
-    Group, MagicLog, Tier,
+    drift, facets, grouped, histogram, histogram_by, migration, page, Bucket, Condition, Cursor,
+    FacetCount, Filter, Governed, Group, MagicLog, Tier,
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -16,7 +16,7 @@ use uuid::Uuid;
     schema = "private",
     chunk = "1 day",
     compress_after = "2 days",
-    segment_by = "unit_id",
+    segment_by = "unit_id, kind",
     search_with = "fold"
 )]
 struct Event {
@@ -34,9 +34,9 @@ struct Event {
     kind: String,
     #[log(top)]
     unit_id: Uuid,
-    #[log(filter)]
+    #[log(filter, bloom)]
     operator: Option<String>,
-    #[log(filter)]
+    #[log(filter, indexed)]
     seen_at: Option<DateTime<Utc>>,
     #[log(search)]
     description: String,
@@ -174,7 +174,10 @@ async fn the_counts_answer_what_the_rows_answer(pool: PgPool) {
             .fetch_all(&pool)
             .await
             .unwrap();
-        assert_ne!(magic_logs::histogram_tier(&spec, &filter, step), Tier::Raw);
+        assert_ne!(
+            magic_logs::histogram_tier(&spec, &filter, step, Some("level")),
+            Tier::Raw
+        );
         let raw: Vec<Bucket> = histogram(&spec, &filter.clone().search("unit"), step)
             .unwrap()
             .build_query_as()
@@ -332,7 +335,7 @@ fn a_filter_is_held_to_the_table() {
         Err(magic_logs::Error::FieldTwice("kind".into()))
     );
     let tier = |f: &Filter, step: Option<Duration>| match step {
-        Some(step) => magic_logs::histogram_tier(&spec, f, step),
+        Some(step) => magic_logs::histogram_tier(&spec, f, step, Some("level")),
         None => magic_logs::parts(&spec, f, &[])
             .iter()
             .map(|p| p.tier)
@@ -375,7 +378,12 @@ fn a_filter_is_held_to_the_table() {
     assert_eq!(tier(&window(7), Some(Duration::days(1))), Tier::Daily);
     assert_eq!(tier(&window(7), None), Tier::Daily);
     assert_eq!(
-        magic_logs::histogram_tier(&spec, &window(7).with("unit_id", ["x"]), Duration::hours(1)),
+        magic_logs::histogram_tier(
+            &spec,
+            &window(7).with("unit_id", ["x"]),
+            Duration::hours(1),
+            Some("level")
+        ),
         Tier::HourlyTop
     );
     // A window is read whole days from the daily counts, whole hours beside
@@ -526,7 +534,7 @@ async fn a_question_narrowed_to_one_top_reads_its_daily_counts(pool: PgPool) {
     let unit = "00000000-0000-0000-0000-0000000000a2";
     let filter = window(4).with("unit_id", [unit]).with("kind", ["door"]);
     assert_eq!(
-        magic_logs::histogram_tier(&spec, &filter, Duration::days(1)),
+        magic_logs::histogram_tier(&spec, &filter, Duration::days(1), Some("level")),
         Tier::DailyTop
     );
     let (counted, raw) = both_histograms(&pool, &filter, Duration::days(1)).await;
@@ -536,7 +544,7 @@ async fn a_question_narrowed_to_one_top_reads_its_daily_counts(pool: PgPool) {
     assert_eq!(counted, raw);
     // By the hour, the counts per hour and top.
     assert_eq!(
-        magic_logs::histogram_tier(&spec, &filter, Duration::hours(1)),
+        magic_logs::histogram_tier(&spec, &filter, Duration::hours(1), Some("level")),
         Tier::HourlyTop
     );
     let (counted, raw) = both_histograms(&pool, &filter, Duration::hours(1)).await;
@@ -1109,5 +1117,496 @@ async fn a_refresh_in_batches_never_leaves_history_uncounted(pool: PgPool) {
                 .await
                 .unwrap();
         assert_eq!(total, rows);
+    }
+}
+
+fn between(min: Option<&str>, max: Option<&str>) -> Condition {
+    Condition::Between {
+        min: min.map(Into::into),
+        max: max.map(Into::into),
+    }
+}
+
+/// A range of a counted field, and a histogram stacked by another one or by
+/// nothing, answered alike from the counts and from the rows; a range of a
+/// field the counts do not keep reads the rows, and keeps exactly the rows
+/// in it.
+#[sqlx::test(migrations = false)]
+async fn a_range_and_any_stack_are_answered_alike_from_the_counts_and_the_rows(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    for (filter, step, stack) in [
+        (
+            window(4).with_condition("kind", between(Some("door"), Some("gps"))),
+            Duration::days(1),
+            Some("level"),
+        ),
+        (
+            window(4).with_condition("level", between(Some("Warning"), None)),
+            Duration::hours(6),
+            Some("kind"),
+        ),
+        (window(4), Duration::days(1), Some("kind")),
+        (window(1), Duration::hours(1), None),
+    ] {
+        assert_ne!(
+            magic_logs::histogram_tier(&spec, &filter, step, stack),
+            Tier::Raw,
+            "{filter:?}"
+        );
+        let ask = |f: &Filter| histogram_by(&spec, f, step, stack).unwrap();
+        let counted: Vec<Bucket> = ask(&filter)
+            .build_query_as()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        let raw: Vec<Bucket> = ask(&filter.clone().search("unit"))
+            .build_query_as()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(counted, raw, "{filter:?} by {step}, stacked by {stack:?}");
+        assert!(!counted.is_empty());
+        if stack.is_none() {
+            assert!(counted.iter().all(|b| b.stack.is_none()));
+        }
+    }
+
+    let filter = window(4).with_condition("kind", between(None, Some("gps")));
+    let mut counted: Vec<FacetCount> = facets(&spec, &filter, &["kind", "level"])
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let mut raw: Vec<FacetCount> =
+        facets(&spec, &filter.clone().search("unit"), &["kind", "level"])
+            .unwrap()
+            .build_query_as()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    counted.sort_by(|a, b| (&a.field, &a.value).cmp(&(&b.field, &b.value)));
+    raw.sort_by(|a, b| (&a.field, &a.value).cmp(&(&b.field, &b.value)));
+    assert_eq!(counted, raw);
+
+    let seen = window(4).with_condition(
+        "seen_at",
+        between(Some(&day().to_rfc3339()), Some(&day().to_rfc3339())),
+    );
+    assert_eq!(
+        magic_logs::histogram_tier(&spec, &seen, Duration::days(1), None),
+        Tier::Raw
+    );
+    let rows: Vec<Event> = page(&spec, &seen, None, 10_000)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let expected: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM private.events WHERE seen_at = $1")
+            .bind(day())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rows.len() as i64, expected);
+    assert!(rows.iter().all(|e| e.seen_at == Some(day())));
+}
+
+/// A table that counts nothing: a hypertable compressed as it ages, read
+/// as its rows alone, with no counts made.
+#[derive(MagicLog, sqlx::FromRow, Debug)]
+#[log(name = "pings", schema = "private", segment_by = "unit_id")]
+struct Ping {
+    #[log(id)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, indexed)]
+    unit_id: Uuid,
+    #[log(filter, minmax)]
+    strength: Option<i32>,
+}
+
+#[sqlx::test(migrations = false)]
+async fn a_table_that_counts_nothing_is_stored_and_read_as_its_rows(pool: PgPool) {
+    sqlx::raw_sql(
+        "CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE SCHEMA private; \
+         CREATE TABLE private.pings (id uuid NOT NULL, at timestamptz NOT NULL, unit_id uuid NOT NULL, \
+             strength integer, PRIMARY KEY (id, at));",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let spec = Ping::SPEC;
+    assert!(!spec.counts());
+    assert_eq!(spec.tiers(), [Tier::Raw]);
+    sqlx::raw_sql(&held(migration(&spec, plain)))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let counts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM timescaledb_information.continuous_aggregates WHERE hypertable_name = 'pings'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(counts, 0);
+    sqlx::raw_sql(&format!(
+        "INSERT INTO private.pings SELECT gen_random_uuid(), '{start}'::timestamptz + n * interval '1 hour', \
+                ('00000000-0000-0000-0000-0000000000a' || (n % 3))::uuid, n FROM generate_series(0, 47) n",
+        start = day().to_rfc3339()
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Compressed, as it would be once two days old.
+    sqlx::raw_sql("SELECT count(compress_chunk(c)) FROM show_chunks('private.pings') c")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let filter = window(2).with_condition("strength", between(Some("10"), Some("19")));
+    assert_eq!(magic_logs::parts(&spec, &filter, &[]).len(), 1);
+    let bars: Vec<Bucket> = histogram(&spec, &filter, Duration::days(1))
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(bars.iter().map(|b| b.count).sum::<i64>(), 10);
+    let rows: Vec<Ping> = page(&spec, &filter, None, 100)
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 10);
+    for ping in &rows {
+        assert!((10..=19).contains(&ping.strength.unwrap()), "{ping:?}");
+        assert_eq!(
+            ping.at,
+            day() + Duration::hours(ping.strength.unwrap().into())
+        );
+        assert!(!ping.id.is_nil() && !ping.unit_id.is_nil());
+    }
+    let units: Vec<FacetCount> = facets(&spec, &window(2), &["unit_id"])
+        .unwrap()
+        .build_query_as()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        units.iter().map(|f| f.count).collect::<Vec<_>>(),
+        [16, 16, 16]
+    );
+    assert!(
+        grouped(&spec, &window(2), "unit_id", 5).is_err(),
+        "nothing to group by"
+    );
+    let mut conn = pool.acquire().await.unwrap();
+    assert_eq!(drift(&mut conn, &spec).await.unwrap(), []);
+}
+
+/// Whether the release declares sparse indexes: TimescaleDB 2.22 and later.
+async fn declares_sparse(pool: &PgPool) -> bool {
+    sqlx::query_scalar(
+        "SELECT (regexp_match(extversion, '^(\\d+)\\.(\\d+)'))::int[] >= ARRAY[2, 22] \
+           FROM pg_extension WHERE extname = 'timescaledb'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// The database as migrated is the declaration; every change made behind
+/// its back — an index dropped, the chunks, the segments, a policy, a count
+/// that should not be, a view, the sparse indexes — is named.
+#[sqlx::test(migrations = false)]
+async fn drift_names_every_way_the_database_left_the_declaration(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    let mut conn = pool.acquire().await.unwrap();
+    assert_eq!(drift(&mut conn, &spec).await.unwrap(), [], "as migrated");
+
+    let sparse = declares_sparse(&pool).await;
+    sqlx::raw_sql(&format!(
+        "CREATE INDEX hosts_own ON private.events (operator) INCLUDE (kind); \
+         DROP INDEX private.events_kind_at_idx; \
+         SELECT set_chunk_time_interval('private.events', INTERVAL '2 days'); \
+         ALTER TABLE private.events SET (timescaledb.segmentby = 'zone_id'); \
+         {sparse} \
+         CALL remove_columnstore_policy('private.events_daily'); \
+         SELECT remove_continuous_aggregate_policy('private.events_hourly'); \
+         SELECT add_continuous_aggregate_policy('private.events_hourly', start_offset => NULL, \
+             end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes'); \
+         CREATE MATERIALIZED VIEW private.events_weekly WITH (timescaledb.continuous) AS \
+             SELECT time_bucket(INTERVAL '7 days', bucket) AS bucket, sum(events) AS events \
+               FROM private.events_daily GROUP BY 1 WITH NO DATA; \
+         DROP VIEW public.events_hourly_unit;",
+        sparse = if sparse {
+            "ALTER TABLE private.events SET (timescaledb.sparse_index = '');"
+        } else {
+            ""
+        }
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let found = drift(&mut conn, &spec).await.unwrap();
+    let said: Vec<(String, String)> = found
+        .iter()
+        .map(|d| (d.relation.clone(), d.what.clone()))
+        .collect();
+    let mut expected = vec![
+        ("private.events", "chunk"),
+        ("private.events", "segmentby"),
+        ("private.events", "index events_kind_at_idx"),
+        ("private.events_weekly", "count"),
+        ("private.events_daily", "compress_after"),
+        ("private.events_hourly", "refresh"),
+        ("public.events_hourly_unit", "view"),
+    ];
+    if sparse {
+        expected.push(("private.events", "sparse_index"));
+    }
+    for (relation, what) in &expected {
+        assert!(
+            said.iter().any(|(r, w)| r == relation && w == what),
+            "{relation} {what} not in {found:#?}"
+        );
+    }
+    assert_eq!(found.len(), expected.len(), "{found:#?}");
+    let chunk = found.iter().find(|d| d.what == "chunk").unwrap();
+    assert_eq!(
+        (chunk.declared.as_str(), chunk.found.as_str()),
+        ("1 day", "2 days")
+    );
+    assert_eq!(
+        chunk.to_string(),
+        "private.events: chunk is 2 days, declared 1 day"
+    );
+}
+
+/// A stack the counts keep is read from them, alike; one they do not keep,
+/// with the `top` named, reads the rows; an unknown one is refused.
+#[sqlx::test(migrations = false)]
+async fn a_stack_is_read_from_the_counts_that_keep_it(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    let one_unit = window(4).with("unit_id", ["00000000-0000-0000-0000-0000000000a1"]);
+    assert_eq!(
+        magic_logs::histogram_tier(&spec, &one_unit, Duration::days(1), Some("operator")),
+        Tier::Raw
+    );
+    for (filter, stack, tier) in [
+        (window(4), Some("unit_id"), Tier::DailyTop),
+        (one_unit.clone(), Some("kind"), Tier::DailyTop),
+    ] {
+        assert_eq!(
+            magic_logs::histogram_tier(&spec, &filter, Duration::days(1), stack),
+            tier
+        );
+        let ask = |f: &Filter| histogram_by(&spec, f, Duration::days(1), stack).unwrap();
+        let counted: Vec<Bucket> = ask(&filter)
+            .build_query_as()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        let raw: Vec<Bucket> = ask(&filter.clone().search("unit"))
+            .build_query_as()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(counted, raw, "{filter:?} stacked by {stack:?}");
+        assert!(!counted.is_empty());
+    }
+    assert!(matches!(
+        histogram_by(&spec, &window(1), Duration::hours(1), Some("nothing")),
+        Err(magic_logs::Error::UnknownField(f)) if f == "nothing"
+    ));
+}
+
+/// A table made with counts whose declaration now keeps fewer: every count
+/// it no longer declares is named, a count of a count among them.
+#[sqlx::test(migrations = false)]
+async fn drift_names_every_count_a_narrower_declaration_does_not_make(pool: PgPool) {
+    setup(&pool).await;
+    let full = Event::SPEC;
+    let only_filtered: &'static [magic_logs::Field] = Box::leak(
+        full.fields
+            .iter()
+            .filter(|f| !f.counted && Some(f.column.name) != full.top.map(|t| t.name))
+            .copied()
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    );
+    let mut nothing = full;
+    nothing.level = None;
+    nothing.stack = None;
+    nothing.top = None;
+    nothing.tenant = None;
+    nothing.scope = None;
+    nothing.fields = only_filtered;
+    nothing.storage.segment_by = &[];
+    let mut no_top = full;
+    no_top.top = None;
+    let mut conn = pool.acquire().await.unwrap();
+    for (spec, extra) in [
+        (
+            nothing,
+            &[
+                "events_hourly",
+                "events_daily",
+                "events_hourly_unit",
+                "events_daily_unit",
+            ][..],
+        ),
+        (no_top, &["events_hourly_unit", "events_daily_unit"][..]),
+    ] {
+        let mut named: Vec<String> = drift(&mut conn, &spec)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|d| d.what == "count")
+            .map(|d| d.relation)
+            .collect();
+        named.sort();
+        let mut expected: Vec<String> = extra.iter().map(|c| format!("private.{c}")).collect();
+        expected.sort();
+        assert_eq!(named, expected);
+    }
+}
+
+/// A column of each common type with an index of its own, nothing declared:
+/// what TimescaleDB makes of each, against what the migration re-declares.
+#[derive(MagicLog)]
+#[log(name = "kinds", schema = "private")]
+struct Kinds {
+    #[log(id)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, indexed)]
+    small: i16,
+    #[log(filter, indexed)]
+    whole: i32,
+    #[log(filter, indexed)]
+    big: i64,
+    #[log(filter, indexed, sql = "real")]
+    ratio: f32,
+    #[log(filter, indexed)]
+    share: f64,
+    #[log(filter, indexed)]
+    flag: bool,
+    #[log(filter, indexed)]
+    word: String,
+    #[log(filter, indexed)]
+    ref_id: Uuid,
+    #[log(filter, indexed)]
+    seen: DateTime<Utc>,
+    #[log(filter, indexed, sql = "numeric")]
+    amount: String,
+    #[log(filter, indexed, sql = "date")]
+    day: String,
+    #[log(filter, indexed, sql = "interval")]
+    span: String,
+    #[log(filter, indexed, sql = "money")]
+    cost: String,
+    #[log(filter, indexed, sql = "bit(3)")]
+    bits: String,
+    #[log(filter, indexed, sql = "varbit")]
+    vbits: String,
+    #[log(filter, indexed, sql = "tsvector")]
+    words: String,
+}
+
+#[sqlx::test(migrations = false)]
+async fn the_sparse_index_redeclared_for_an_indexed_column_is_timescaledbs_own(pool: PgPool) {
+    let _ = |k: Kinds| {
+        (
+            k.id, k.at, k.small, k.whole, k.big, k.ratio, k.share, k.flag, k.word, k.ref_id,
+            k.seen, k.amount, k.day, k.span, k.cost, k.bits, k.vbits, k.words,
+        )
+    };
+    sqlx::raw_sql(
+        "CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE SCHEMA private; \
+         CREATE TABLE private.kinds (id uuid NOT NULL, at timestamptz NOT NULL, small smallint, \
+             whole integer, big bigint, ratio real, share double precision, flag boolean, word text, \
+             ref_id uuid, seen timestamptz, amount numeric, day date, span interval, cost money, \
+             bits bit(3), vbits varbit, words tsvector, PRIMARY KEY (id, at))",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let spec = Kinds::SPEC;
+    sqlx::raw_sql(&held(migration(&spec, plain)))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(&format!(
+        "INSERT INTO private.kinds SELECT gen_random_uuid(), '{start}'::timestamptz + n * interval '1 minute', \
+                n % 100, n, n, n / 7.0, n / 3.0, n % 2 = 0, 'w' || (n % 50), gen_random_uuid(), \
+                '{start}'::timestamptz + n * interval '1 second', n / 10.0, '2026-10-01'::date + n % 9, \
+                n * interval '1 second', n::money, (n % 8)::bit(3), (n % 8)::bit(3)::varbit, \
+                to_tsvector('simple', 'w' || n) FROM generate_series(0, 1439) n; \
+         SELECT count(compress_chunk(c)) FROM show_chunks('private.kinds') c;",
+        start = day().to_rfc3339()
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    // The release's own choice, from the compressed chunk's settings (2.22 on).
+    let made: Option<Vec<(String, String)>> = sqlx::query_as::<_, (String, String)>(
+        "SELECT e->>'column', e->>'type' \
+           FROM timescaledb_information.chunk_columnstore_settings s, \
+                jsonb_array_elements(to_jsonb(s) -> 'index') e \
+          WHERE s.hypertable = 'private.kinds'::regclass AND e->>'source' = 'default' \
+            AND jsonb_typeof(e -> 'column') = 'string'",
+    )
+    .fetch_all(&pool)
+    .await
+    .ok();
+    let Some(made) = made.filter(|m| !m.is_empty()) else {
+        eprintln!("this release reports no sparse index of a chunk: nothing to compare");
+        return;
+    };
+    // What the migration declares, once any field declares one of its own.
+    let mut fields = spec.fields.to_vec();
+    fields.push(magic_logs::Field {
+        column: magic_logs::Column {
+            name: "marker",
+            sql: "bigint",
+        },
+        counted: false,
+        per_top: false,
+        indexed: false,
+        sparse: Some(magic_logs::Sparse::MinMax),
+    });
+    let mut declared = spec;
+    declared.fields = Box::leak(fields.into_boxed_slice());
+    let sql = migration(&declared, plain);
+    let setting = sql
+        .split("timescaledb.sparse_index = ''")
+        .nth(1)
+        .and_then(|rest| rest.split("'')").next())
+        .unwrap_or_default();
+    for f in spec.fields.iter().filter(|f| f.indexed) {
+        let name = f.column.name;
+        let own = made.iter().find(|(c, _)| c == name).map(|(_, kind)| {
+            if kind == "minmax" {
+                "minmax"
+            } else {
+                "bloom"
+            }
+        });
+        let redeclared = ["minmax", "bloom"]
+            .into_iter()
+            .find(|k| setting.contains(&format!("{k}(\"{name}\")")));
+        assert_eq!(
+            redeclared, own,
+            "{name} ({}): made {made:?}, declared {setting}",
+            f.column.sql
+        );
     }
 }

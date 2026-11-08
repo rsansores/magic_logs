@@ -16,7 +16,8 @@ fn main() {
     let spec = Ping::SPEC;
     assert_eq!(spec.view_schema, "public");
     assert_eq!((spec.storage.chunk, spec.storage.compress_after), ("1 day", "2 days"));
-    assert_eq!(spec.storage.segment_by, None);
+    assert!(spec.storage.segment_by.is_empty());
+    assert_eq!(spec.stack, None);
     assert_eq!(spec.id.sql, "bigint");
     assert!(spec.fields.is_empty() && spec.search.is_empty());
     assert!(spec.level.is_none() && spec.top.is_none() && spec.tenant.is_none());

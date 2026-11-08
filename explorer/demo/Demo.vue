@@ -166,7 +166,7 @@ const hovered = ref<number | null>(null)
 
       <main class="main">
         <section class="card chart">
-          <LogHistogram :levels="levels" v-slot="{ geometry, brushed, handlers }">
+          <LogHistogram :stacks="levels" v-slot="{ geometry, brushed, handlers }">
             <!-- What the bars drawn count, over the plot they are drawn on:
                  from the start of the first bucket, which is counted whole. -->
             <div class="chart-head">
@@ -205,8 +205,8 @@ const hovered = ref<number | null>(null)
                   <g v-for="(bar, i) in geometry.bars" :key="bar.at" @pointerenter="hovered = i">
                     <rect
                       v-for="s in bar.segments"
-                      :key="s.level"
-                      :class="`lv-${s.level}`"
+                      :key="s.stack"
+                      :class="`lv-${s.stack}`"
                       :x="bar.x * 1000 + 0.6"
                       :width="Math.max(bar.width * 1000 - 1.2, 0.6)"
                       :y="100 - s.y1 * 100"
@@ -230,10 +230,10 @@ const hovered = ref<number | null>(null)
                   <b>{{ moment.format(geometry.bars[hovered]!.at) }}</b>
                   <span
                     v-for="s in [...geometry.bars[hovered]!.segments].reverse()"
-                    :key="s.level"
-                    :class="`lv-${s.level}`"
+                    :key="s.stack"
+                    :class="`lv-${s.stack}`"
                   >
-                    <i />{{ s.level }} {{ number.format(s.count) }}
+                    <i />{{ s.stack }} {{ number.format(s.count) }}
                   </span>
                 </div>
               </div>

@@ -1,8 +1,8 @@
 // Generated from magic_logs' answer rows by its test `the_explorers_types_are_generated_from_these`: UPDATE_CONTRACT=1 rewrites it.
 
 /**
- * One bar of the histogram: the rows of `level` in the bucket that begins
- * at `bucket`.
+ * One bar of the histogram: the rows holding `stack` in the bucket that
+ * begins at `bucket`.
  */
 export type BucketRow = { 
 /**
@@ -10,9 +10,10 @@ export type BucketRow = {
  */
 bucket: string, 
 /**
- * The level, as text; `None` for rows without one, or a table with no level.
+ * The value of the field the histogram is stacked by, as text; `None`
+ * for rows without one, or a histogram stacked by nothing.
  */
-level: string | null, 
+stack: string | null, 
 /**
  * How many rows.
  */

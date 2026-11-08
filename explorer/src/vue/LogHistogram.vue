@@ -1,11 +1,11 @@
 <script setup lang="ts">
-// The histogram's geometry, stacked by `levels`, drawn on the window its
+// The histogram's geometry, stacked in the order of `stacks`, drawn on the window its
 // buckets answer, and the handlers that zoom the window by brushing it. The
 // slot draws it.
 import type { Bar, Geometry } from '../core/histogram.js'
 import { useExplorerContext, useHistogram, type Histogram } from './parts.js'
 
-const props = defineProps<{ levels?: readonly string[] }>()
+const props = defineProps<{ stacks?: readonly string[] }>()
 defineSlots<{
   default(props: {
     geometry: Geometry
@@ -19,7 +19,7 @@ const context = useExplorerContext('LogHistogram')
 const histogram = useHistogram(
   () => context.explorer,
   () => context.answers.buckets.value,
-  () => props.levels,
+  () => props.stacks,
   () => context.answers.bucketsAnswer.value,
 )
 </script>

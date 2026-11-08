@@ -59,6 +59,7 @@ struct Table {
     chunk: Option<LitStr>,
     compress_after: Option<LitStr>,
     segment_by: Option<LitStr>,
+    stack: Option<LitStr>,
     search_with: Option<LitStr>,
     krate: Option<LitStr>,
 }
@@ -75,6 +76,8 @@ struct Flags {
     per_top: bool,
     filter: bool,
     indexed: bool,
+    minmax: bool,
+    bloom: bool,
     search: bool,
     sql: Option<LitStr>,
 }
@@ -103,12 +106,13 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 "chunk" => &mut table.chunk,
                 "compress_after" => &mut table.compress_after,
                 "segment_by" => &mut table.segment_by,
+                "stack" => &mut table.stack,
                 "search_with" => &mut table.search_with,
                 "crate" => &mut table.krate,
                 _ => {
                     return Err(meta.error(
                         "expected `name`, `schema`, `view_schema`, `chunk`, `compress_after`, \
-                         `segment_by`, `search_with` or `crate`",
+                         `segment_by`, `stack`, `search_with` or `crate`",
                     ))
                 }
             };
@@ -184,6 +188,8 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                         "per_top" => &mut flags.per_top,
                         "filter" => &mut flags.filter,
                         "indexed" => &mut flags.indexed,
+                        "minmax" => &mut flags.minmax,
+                        "bloom" => &mut flags.bloom,
                         "search" => &mut flags.search,
                         "sql" => {
                             flags.sql = Some(meta.value()?.parse()?);
@@ -191,7 +197,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                         }
                         _ => return Err(meta.error(
                             "expected `time`, `id`, `tenant`, `scope`, `level`, `top`, `facet`, \
-                             `per_top`, `filter`, `indexed`, `search` or `sql = \"…\"`",
+                             `per_top`, `filter`, `indexed`, `minmax`, `bloom`, `search` or `sql = \"…\"`",
                         )),
                     };
                 *flag = true;
@@ -205,6 +211,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             .ident
             .as_ref()
             .map_or(Span::call_site(), syn::Ident::span);
+        if flags.facet && (flags.tenant || flags.scope) {
+            return Err(syn::Error::new(
+                at,
+                "the tenant and the scope are kept in every count: not also a `facet`",
+            ));
+        }
         if flags.per_top && !flags.facet {
             return Err(syn::Error::new(at, "`per_top` qualifies a `facet`"));
         }
@@ -212,6 +224,20 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             return Err(syn::Error::new(
                 at,
                 "`indexed` qualifies a `facet` or a `filter`",
+            ));
+        }
+        let filtered =
+            flags.facet || flags.filter || flags.level || flags.scope || flags.tenant || flags.top;
+        if (flags.minmax || flags.bloom) && !filtered {
+            return Err(syn::Error::new(
+                at,
+                "`minmax` and `bloom` qualify a column a filter may name: a `facet`, a `filter`, …",
+            ));
+        }
+        if flags.minmax && flags.bloom {
+            return Err(syn::Error::new(
+                at,
+                "a column keeps one sparse index: `minmax` for ranges, or `bloom` for equality",
             ));
         }
         let role = flags.time
@@ -238,6 +264,18 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 )
             })?,
         };
+        if (flags.minmax || flags.bloom) && no_sparse(&sql) {
+            return Err(syn::Error::new(
+                at,
+                format!("`{sql}` has no order and no hash: no sparse index can be made of it"),
+            ));
+        }
+        if flags.bloom && no_hash(&sql) {
+            return Err(syn::Error::new(
+                at,
+                format!("`{sql}` has no hash for a bloom filter: `minmax` keeps its range"),
+            ));
+        }
         // The column's name: `r#type` is the column `type`.
         let name = field
             .ident
@@ -304,17 +342,62 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let scope = one(|f| f.scope, "scope", false)?;
     let level = one(|f| f.level, "level", false)?;
     let top = one(|f| f.top, "top", false)?;
+    let mut segment_by: Vec<String> = Vec::new();
     if let Some(segment) = &table.segment_by {
-        if !cols.iter().any(|c| c.name == segment.value()) {
-            return Err(syn::Error::new_spanned(
-                segment,
-                "segment_by names a field marked #[log(…)]",
+        for name in segment.value().split(',').map(str::trim) {
+            if !cols.iter().any(|c| c.name == name) {
+                return Err(syn::Error::new_spanned(
+                    segment,
+                    "segment_by names fields marked #[log(…)], separated by commas",
+                ));
+            }
+            if name == time.name || name == id.name {
+                return Err(syn::Error::new_spanned(
+                    segment,
+                    "the time and the id order a compressed chunk: segment_by names another column",
+                ));
+            }
+            if segment_by.iter().any(|s| s == name) {
+                return Err(syn::Error::new_spanned(
+                    segment,
+                    format!("segment_by names `{name}` twice"),
+                ));
+            }
+            segment_by.push(name.to_owned());
+        }
+    }
+    // A segment is one value of every segment_by column, and the time and the
+    // id order its rows: a batch of it already holds the range of each.
+    for c in cols.iter().filter(|c| c.flags.minmax || c.flags.bloom) {
+        if segment_by.contains(&c.name) || c.name == time.name || c.name == id.name {
+            return Err(syn::Error::new(
+                c.at,
+                "a sparse index is of a column a segment holds many values of: not of the time, \
+                 the id or a segment_by column",
             ));
         }
-        if segment.value() == time.name || segment.value() == id.name {
+    }
+    let stack = match &table.stack {
+        Some(lit) => {
+            let counted = cols.iter().find(|c| {
+                c.name == lit.value()
+                    && (c.flags.facet || c.flags.level || c.flags.scope || c.flags.tenant)
+            });
+            let Some(c) = counted else {
+                return Err(syn::Error::new_spanned(
+                    lit,
+                    "stack names a counted field: a `facet`, the `level`, the `scope` or the `tenant`",
+                ));
+            };
+            Some(c)
+        }
+        None => level,
+    };
+    for (lit, what) in [(&table.name, "name"), (&table.schema, "schema")] {
+        if let Some(lit) = lit.as_ref().filter(|l| l.value().contains('$')) {
             return Err(syn::Error::new_spanned(
-                segment,
-                "the time and the id order a compressed chunk: segment_by names another column",
+                lit,
+                format!("`{what}` holds a `$`: refused, so no name can end a quoted block of the migration"),
             ));
         }
     }
@@ -329,11 +412,15 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     }
     // Every relation and index the migration names, whole: PostgreSQL cuts
     // a longer name short, and two cut alike collide.
-    let mut names = vec![
-        format!("{name}_hourly"),
-        format!("{name}_daily"),
-        format!("{name}_{}_{}_idx", time.name, id.name),
-    ];
+    // A table that counts nothing makes no counts, and so no count's name.
+    let counts = cols
+        .iter()
+        .any(|c| c.flags.level || c.flags.facet || c.flags.top);
+    let mut names = vec![format!("{name}_{}_{}_idx", time.name, id.name)];
+    if counts {
+        names.push(format!("{name}_hourly"));
+        names.push(format!("{name}_daily"));
+    }
     if let Some(top) = top {
         let short = top.name.strip_suffix("_id").unwrap_or(&top.name);
         names.push(format!("{name}_daily_{short}"));
@@ -382,7 +469,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             let counted = c.flags.facet || c.flags.level || c.flags.scope || c.flags.tenant;
             let per_top = c.flags.per_top || c.flags.level || c.flags.scope || c.flags.tenant;
             let indexed = c.flags.indexed;
-            quote!(#krate::Field { column: #col, counted: #counted, per_top: #per_top, indexed: #indexed })
+            let sparse = match (c.flags.minmax, c.flags.bloom) {
+                (true, _) => quote!(::core::option::Option::Some(#krate::Sparse::MinMax)),
+                (_, true) => quote!(::core::option::Option::Some(#krate::Sparse::Bloom)),
+                _ => quote!(::core::option::Option::None),
+            };
+            quote!(#krate::Field { column: #col, counted: #counted, per_top: #per_top, indexed: #indexed, sparse: #sparse })
         });
     let search = cols
         .iter()
@@ -393,13 +485,14 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         None => quote!(::core::option::Option::None),
     };
     let (time_name, id_col) = (&time.name, column(id));
-    let (tenant, scope, level, top) = (
+    let (tenant, scope, level, stack, top) = (
         option_name(tenant),
         option_name(scope),
         option(level),
+        option(stack),
         option(top),
     );
-    let (segment_by, search_with) = (opt_lit(&table.segment_by), opt_lit(&table.search_with));
+    let search_with = opt_lit(&table.search_with);
 
     Ok(quote! {
         impl #krate::MagicLog for #ident {
@@ -412,6 +505,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 tenant: #tenant,
                 scope: #scope,
                 level: #level,
+                stack: #stack,
                 top: #top,
                 fields: &[#(#fields),*],
                 search: &[#(#search),*],
@@ -419,11 +513,32 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 storage: #krate::Storage {
                     chunk: #chunk,
                     compress_after: #compress_after,
-                    segment_by: #segment_by,
+                    segment_by: &[#(#segment_by),*],
                 },
             };
         }
     })
+}
+
+/// Whether `sql` is a type TimescaleDB makes no sparse index of at all.
+fn no_sparse(sql: &str) -> bool {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    matches!(
+        bare,
+        "json" | "xml" | "point" | "line" | "lseg" | "box" | "path" | "polygon" | "circle"
+    )
+}
+
+/// Whether `sql` is a type TimescaleDB builds no bloom filter of.
+fn no_hash(sql: &str) -> bool {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let base = bare.split('(').next().unwrap_or(bare).trim();
+    matches!(
+        base,
+        "money" | "bit" | "varbit" | "bit varying" | "tsvector" | "tsquery"
+    )
 }
 
 /// The SQL type a Rust type is read as, through an `Option`.

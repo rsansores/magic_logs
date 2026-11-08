@@ -1,5 +1,77 @@
 # Changelog
 
+## Unreleased
+
+Breaking: a filter field holds a `Condition`, a histogram row's `level` is
+its `stack`, `segment_by` is a list, and a table that counts nothing gets no
+counts.
+
+- **Ranges.** `Condition::{AnyOf, Between}`: a field is one of some values,
+  or between two inclusive bounds, either left out. `Filter::with` is
+  `AnyOf`; `Filter::with_condition` takes either. The counts answer a range
+  of a field they keep. `Filter::fields` holds `(field, Condition)`.
+- **Any stack.** `#[log(stack = "…")]` names the counted field the
+  histogram is stacked by, the `level` when left out (`Spec::stack`);
+  `histogram_by` stacks by any field, or by none, from the rows when no
+  count keeps it. `Bucket.level` is `Bucket.stack`, and `histogram_tier`
+  takes the stack.
+- **`Error::DoesNotFit`**: a filter value a `bit(n)`, `varbit(n)` or
+  `"char"` column cannot hold whole, which the cast would cut or pad into
+  another value, is refused before any SQL.
+- **The derive refuses** a `$` in `name` or `schema` (so no name can end
+  a quoted block of the migration), and a `facet` that is also the `tenant` or the
+  `scope`, which every count keeps already.
+- **Tables that count nothing.** A table with no `level`, `facet` or `top`
+  is stored as its rows alone: the hypertable, its indexes, its columnstore
+  and its view, no counts (`Spec::counts`). Such a table made by 0.1 has
+  hourly and daily counts its declaration no longer has: `drift` names
+  them, and any count over them, and a host drops them (`DROP MATERIALIZED VIEW … CASCADE`, after
+  its views) or keeps them unread.
+- **Segments and sparse indexes.** `segment_by = "a, b"` segments by
+  several columns (`Storage::segment_by` is a slice). `#[log(minmax)]` and
+  `#[log(bloom)]` on a column a filter names are its sparse index
+  (`Field::sparse`, `Sparse`), declared by the migration on TimescaleDB
+  2.22.1 and later, beside the sparse index TimescaleDB makes of each
+  indexed column (a `minmax` of a time, a date, a number other than an
+  `integer` or `bigint`, a boolean, `money`, a bit string or a text search
+  type, a `"char"`; a bloom of any other), which declaring any would
+  otherwise drop. The derive refuses a `bloom` of a type with no hash, and
+  either of a type with neither order nor hash (`json`, `xml`, a geometric). A table made by 0.1 is unchanged; one
+  that adds them runs `ALTER TABLE … SET (timescaledb.segmentby = …)` and
+  then, on 2.22.1 and later, `ALTER TABLE … SET (timescaledb.sparse_index =
+  …)` as the migration spells it — in that order, as a column 0.1 segmented
+  by refuses a sparse index until it is no longer a segment column — each
+  applying to the chunks compressed from then on. A bloom filter serves a
+  filter of one value on every release, and one of several values from 2.31.
+  Declaring any also drops the blooms TimescaleDB makes of several columns of
+  one index, the primary key's among them.
+- A value a filter compares is cast in place, to the column's bare type,
+  when that type reads text the same in every session (a number, text, a
+  uuid, a boolean), so the filter can run vectorized on compressed batches
+  (on 2.31: not for `numeric`); a timestamp's or an enum's is cast once, in
+  a sub-select, as before. A typmod of a `numeric`, a `varchar` or a time no
+  longer rounds or cuts a bound, and a `char(n)` is cast to `bpchar`: `numeric(15,3)` compares with the value as
+  sent. A filter of one value is `=`, of several `= ANY`.
+- **`drift`.** What the database holds, against the declaration: the
+  hypertable, its chunks, columnstore and policy, the indexes, every count
+  with its columns, refresh (oldest first included) and columnstore, a count the table should not
+  have, and the views. One `Drift` per difference, for a test after a
+  host's migrations: a released migration is never edited, so this, not a
+  file comparison, is what keeps the database the declaration.
+- What the migration writes otherwise is unchanged: a table made by 0.1
+  with the same declaration is the table 0.2 declares.
+- `magic_logs_explorer`: `BucketRow.stack`, a histogram's `Segment.stack`
+  and its order as `stacks` (`geometry`, `useHistogram`, `LogHistogram`'s
+  prop), were `level` and `levels`. Ranges: `between`, a codec of
+  `min..max` either side empty; `Bounds`; `Question.ranges`;
+  `useLogExplorer`'s `ranges` option (`RangeOptions`) and its `ranges` and
+  `rangeNames`, cleared by `clear` and counted by `narrowed`;
+  `LogExplorer` and `LogExplorerOptions` take a second type parameter, the
+  ranges' names: `useLogExplorer` infers `never` when there are none, and
+  `LogExplorer`'s default is `string`, which every explorer fits.
+- `examples/fleet`: an odometer filtered by range, the trucks' positions as
+  a table that counts nothing, and `drift` at start.
+
 ## 0.1.1 — 2026-10-27
 
 - A search matches words: a row matches when every word of the search is

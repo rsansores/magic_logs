@@ -8,10 +8,10 @@ const range = { from: new Date(at(0)), to: new Date(at(4)) }
 describe('stack', () => {
   it('turns one row per bucket and level into one bar per bucket, oldest first', () => {
     const bars = stack([
-      { bucket: new Date(at(1)).toISOString(), level: 'error', count: 2 },
-      { bucket: new Date(at(0)).toISOString(), level: 'info', count: 5 },
-      { bucket: new Date(at(1)).toISOString(), level: 'info', count: 1 },
-      { bucket: new Date(at(1)).toISOString(), level: null, count: 4 },
+      { bucket: new Date(at(1)).toISOString(), stack: 'error', count: 2 },
+      { bucket: new Date(at(0)).toISOString(), stack: 'info', count: 5 },
+      { bucket: new Date(at(1)).toISOString(), stack: 'info', count: 1 },
+      { bucket: new Date(at(1)).toISOString(), stack: null, count: 4 },
     ])
     expect(bars).toEqual([
       { at: at(0), counts: { info: 5 } },
@@ -35,14 +35,14 @@ describe('fill', () => {
 })
 
 describe('geometry', () => {
-  it('stacks each bar in the order of the levels, a level not among them last', () => {
+  it('stacks each bar in the order of the stacks, a stack not among them last', () => {
     const { bars, max } = geometry([{ at: at(1), counts: { debug: 1, error: 2, info: 5 } }], range, HOUR, [
       'info',
       'error',
     ])
     expect(max).toBe(10)
     const bar = bars[1]!
-    expect(bar.segments.map((s) => s.level)).toEqual(['info', 'error', 'debug'])
+    expect(bar.segments.map((s) => s.stack)).toEqual(['info', 'error', 'debug'])
     expect(bar.segments.map((s) => [s.y0, s.y1])).toEqual([
       [0, 0.5],
       [0.5, 0.7],
@@ -119,5 +119,18 @@ describe('selection', () => {
 
   it('selects one step for a press without a drag', () => {
     expect(selection(range, 0.3, 0.3, HOUR)).toEqual({ from: new Date(at(1)), to: new Date(at(2)) })
+  })
+
+  it('stacks by a value that is also a name objects inherit', () => {
+    const rows = [
+      { bucket: new Date(at(0)).toISOString(), stack: 'constructor', count: 2 },
+      { bucket: new Date(at(0)).toISOString(), stack: '__proto__', count: 3 },
+    ]
+    const bars = geometry(stack(rows), { from: new Date(at(0)), to: new Date(at(1)) }, HOUR, ['toString'])
+    expect(bars.bars[0]!.total).toBe(5)
+    expect(bars.bars[0]!.segments.map((s) => [s.stack, s.count])).toEqual([
+      ['__proto__', 3],
+      ['constructor', 2],
+    ])
   })
 })

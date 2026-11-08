@@ -1,0 +1,5 @@
+error: `minmax` and `bloom` qualify a column a filter may name: a `facet`, a `filter`, …
+  --> tests/derive/fail/sparse_unfiltered.rs:12:9
+   |
+12 |     pub message: String,
+   |         ^^^^^^^

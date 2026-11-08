@@ -83,62 +83,62 @@ export default {
     {
       "bucket": "2026-10-01T00:00:00Z",
       "count": 21,
-      "level": "Error"
+      "stack": "Error"
     },
     {
       "bucket": "2026-10-01T00:00:00Z",
       "count": 44,
-      "level": "Info"
+      "stack": "Info"
     },
     {
       "bucket": "2026-10-01T00:00:00Z",
       "count": 22,
-      "level": "Warning"
+      "stack": "Warning"
     },
     {
       "bucket": "2026-10-01T06:00:00Z",
       "count": 22,
-      "level": "Error"
+      "stack": "Error"
     },
     {
       "bucket": "2026-10-01T06:00:00Z",
       "count": 43,
-      "level": "Info"
+      "stack": "Info"
     },
     {
       "bucket": "2026-10-01T06:00:00Z",
       "count": 21,
-      "level": "Warning"
+      "stack": "Warning"
     },
     {
       "bucket": "2026-10-01T12:00:00Z",
       "count": 22,
-      "level": "Error"
+      "stack": "Error"
     },
     {
       "bucket": "2026-10-01T12:00:00Z",
       "count": 43,
-      "level": "Info"
+      "stack": "Info"
     },
     {
       "bucket": "2026-10-01T12:00:00Z",
       "count": 22,
-      "level": "Warning"
+      "stack": "Warning"
     },
     {
       "bucket": "2026-10-01T18:00:00Z",
       "count": 21,
-      "level": "Error"
+      "stack": "Error"
     },
     {
       "bucket": "2026-10-01T18:00:00Z",
       "count": 44,
-      "level": "Info"
+      "stack": "Info"
     },
     {
       "bucket": "2026-10-01T18:00:00Z",
       "count": 21,
-      "level": "Warning"
+      "stack": "Warning"
     }
   ],
   "question": {

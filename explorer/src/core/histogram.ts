@@ -1,18 +1,19 @@
-// A histogram's geometry, for any renderer: bars stacked by level, the
+// A histogram's geometry, for any renderer: bars stacked by a field, the
 // scale's ticks and a brushed selection, each placed as a fraction of the
 // plot (0 to 1), so an SVG, a canvas or a chart library draws it the same.
 
 import type { Bucket, BucketRow } from './contract/types.js'
 import type { Range } from './window.js'
 
-/** `histogram`'s rows, one per bucket and level, as one bar per bucket. */
+/** `histogram`'s rows, one per bucket and stack, as one bar per bucket. */
 export function stack(rows: readonly BucketRow[]): Bucket[] {
   const byAt = new Map<number, Record<string, number>>()
   for (const row of rows) {
     const at = Date.parse(row.bucket)
-    const counts = byAt.get(at) ?? {}
-    const level = row.level ?? ''
-    counts[level] = (counts[level] ?? 0) + row.count
+    // No prototype: a stack is any field's value, `constructor` among them.
+    const counts = byAt.get(at) ?? (Object.create(null) as Record<string, number>)
+    const stack = row.stack ?? ''
+    counts[stack] = (counts[stack] ?? 0) + row.count
     byAt.set(at, counts)
   }
   return [...byAt].sort(([a], [b]) => a - b).map(([at, counts]) => ({ at, counts }))
@@ -24,13 +25,14 @@ export function fill(buckets: readonly Bucket[], range: Range, step: number): Bu
   const byAt = new Map(buckets.map((b) => [b.at, b.counts]))
   const out: Bucket[] = []
   for (let at = Math.floor(range.from.getTime() / step) * step; at < range.to.getTime(); at += step)
-    out.push({ at, counts: byAt.get(at) ?? {} })
+    out.push({ at, counts: byAt.get(at) ?? (Object.create(null) as Record<string, number>) })
   return out
 }
 
-/** One level's part of a bar, from `y0` to `y1` of the plot's height. */
+/** One stack's part of a bar, from `y0` to `y1` of the plot's height. */
 export interface Segment {
-  level: string
+  /** The value of the field the bars are stacked by; '' for rows without one. */
+  stack: string
   count: number
   y0: number
   y1: number
@@ -44,7 +46,7 @@ export interface Bar {
   x: number
   width: number
   total: number
-  /** Bottom to top, in the order of the levels. */
+  /** Bottom to top, in the order of the stacks. */
   segments: Segment[]
 }
 
@@ -67,13 +69,13 @@ export interface Geometry {
   range: Range
 }
 
-/** The geometry of `buckets` over `range`, stacked in the order of `levels`;
- * a level not among them is stacked last. */
+/** The geometry of `buckets` over `range`, stacked in the order of `stacks`;
+ * a stack not among them is stacked last. */
 export function geometry(
   buckets: readonly Bucket[],
   range: Range,
   step: number,
-  levels: readonly string[] = [],
+  stacks: readonly string[] = [],
 ): Geometry {
   // The plot spans the buckets the window touches, whole: magic_logs counts
   // each of them whole, the first and the last too.
@@ -87,18 +89,18 @@ export function geometry(
   const clip = (v: number) => Math.min(Math.max(v, 0), 1)
   const bars = filled.map((b, i): Bar => {
     const order = [
-      ...levels,
+      ...stacks,
       ...Object.keys(b.counts)
-        .filter((l) => !levels.includes(l))
+        .filter((l) => !stacks.includes(l))
         .sort(),
     ]
     // Summed in counts and divided once, so a stack's edges meet exactly.
     let below = 0
     const segments: Segment[] = []
-    for (const level of order) {
-      const count = b.counts[level] ?? 0
+    for (const stack of order) {
+      const count = b.counts[stack] ?? 0
       if (count <= 0) continue
-      segments.push({ level, count, y0: below / max, y1: (below + count) / max })
+      segments.push({ stack, count, y0: below / max, y1: (below + count) / max })
       below += count
     }
     const x = clip((b.at - from) / span)

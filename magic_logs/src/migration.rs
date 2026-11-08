@@ -73,16 +73,19 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         out.push_str("\n\n");
     };
 
+    let counts = match spec.top {
+        _ if !spec.counts() => ", stored as its rows alone".to_owned(),
+        Some(t) => format!(
+            ", counted by hour and by day, and by hour and by day per {}",
+            t.name
+        ),
+        None => ", counted by hour and by day".to_owned(),
+    };
     push(format!(
-        "-- magic_logs: {table}, a hypertable of {chunk} chunks compressed after {after}, \
-         counted by hour{counts}.",
+        "-- magic_logs: {table}, a hypertable of {chunk} chunks compressed after {after}{counts}.",
         table = qualified(spec.schema, spec.name),
         chunk = st.chunk,
         after = st.compress_after,
-        counts = spec.top.map_or(" and by day".to_owned(), |t| format!(
-            " and by day, and by hour and by day per {}",
-            t.name
-        )),
     ));
     // Older releases refresh compressed counts under TimescaleDB's cap on
     // rows decompressed by one statement: past it, a late row's refresh
@@ -102,37 +105,27 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         literal(st.chunk)
     ));
 
-    // A page is the newest rows first, the id breaking ties; narrowed to one
-    // value of an indexed field, or to one `top`, it walks only those rows.
-    let mut indexes = vec![format!(
-        "CREATE INDEX {} ON {table} ({time} DESC, {id} DESC);",
-        ident(&format!("{}_{}_{}_idx", spec.name, spec.time, spec.id.name))
-    )];
-    let indexed = spec.top.map(|t| t.name).into_iter().chain(
-        spec.fields
-            .iter()
-            .filter(|f| f.indexed)
-            .map(|f| f.column.name),
-    );
-    let mut seen = Vec::new();
-    for field in indexed {
-        if seen.contains(&field) {
-            continue;
-        }
-        seen.push(field);
-        indexes.push(format!(
-            "CREATE INDEX {} ON {table} ({}, {time} DESC, {id} DESC);",
-            ident(&format!("{}_{}_{}_idx", spec.name, field, spec.time)),
-            ident(field)
-        ));
-    }
+    let indexes: Vec<String> = indexes(spec)
+        .into_iter()
+        .map(|(name, columns)| {
+            let columns: Vec<String> = columns
+                .iter()
+                .map(|(c, desc)| format!("{}{}", ident(c), if *desc { " DESC" } else { "" }))
+                .collect();
+            format!(
+                "CREATE INDEX {} ON {table} ({});",
+                ident(&name),
+                columns.join(", ")
+            )
+        })
+        .collect();
     push(indexes.join("\n"));
 
     // No segment_by is no segmenting, said: left out, TimescaleDB picks a
     // column of its own, the id among them, which the order already uses.
     let segment = format!(
         ",\n    timescaledb.segmentby = {}",
-        literal(&st.segment_by.map(ident).unwrap_or_default())
+        literal(&segmented(spec))
     );
     push(format!(
         "ALTER TABLE {table} SET (\n    timescaledb.enable_columnstore{segment},\n    timescaledb.orderby = {}\n);\nCALL add_columnstore_policy({}, after => INTERVAL {});",
@@ -140,6 +133,33 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         literal(&table),
         literal(st.compress_after)
     ));
+    if let Some(sparse) = sparse_index(spec) {
+        // TimescaleDB declares a column's sparse index from 2.22.1 on (2.22.0
+        // is refused above); on 2.21
+        // a chunk keeps only those it makes of itself, and `drift` says
+        // what is missing once the database runs a release that declares
+        // them.
+        push(format!(
+            "DO $ml$\nBEGIN\n    IF (regexp_match((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '^(\\d+)\\.(\\d+)'))::int[] >= ARRAY[2, 22] THEN\n        \
+             EXECUTE {};\n    END IF;\nEND\n$ml$;",
+            literal(&format!(
+                "ALTER TABLE {table} SET (timescaledb.sparse_index = {})",
+                literal(&sparse)
+            ))
+        ));
+    }
+    if !spec.counts() {
+        push(govern(&Governed {
+            view_schema: spec.view_schema,
+            view: spec.name,
+            schema: spec.schema,
+            relation: spec.name,
+            scope: spec.scope,
+        }));
+        out.truncate(out.trim_end().len());
+        out.push('\n');
+        return out;
+    }
 
     // `, "a", "b"`: nothing at all for a table that counts only its rows.
     let listed = |columns: Vec<&str>| -> String {
@@ -240,4 +260,152 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
     out.truncate(out.trim_end().len());
     out.push('\n');
     out
+}
+
+/// The table's `segmentby`: its segment_by columns, quoted, in order.
+pub(crate) fn segmented(spec: &Spec) -> String {
+    spec.storage
+        .segment_by
+        .iter()
+        .map(|c| ident(c))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The table's `sparse_index` setting: each field's, in declaration order;
+/// none when no field declares one. Declaring any takes the place of those
+/// TimescaleDB makes of itself for each column with an index ([`own_sparse`])
+/// — so the migration declares those too, after the fields' own: the
+/// `top`'s and every `indexed` field's, but the time's, the id's and a
+/// segment_by column's, which the order and the segments already hold.
+/// What is still lost are the ones TimescaleDB makes for an index of the
+/// host's own and the blooms it makes of several columns of one index.
+pub(crate) fn sparse_index(spec: &Spec) -> Option<String> {
+    let mut declared: Vec<(&str, &str)> = spec
+        .fields
+        .iter()
+        .filter_map(|f| f.sparse.map(|kind| (kind.name(), f.column.name)))
+        .collect();
+    if declared.is_empty() {
+        return None;
+    }
+    let indexed = spec
+        .top
+        .into_iter()
+        .chain(spec.fields.iter().filter(|f| f.indexed).map(|f| f.column));
+    for column in indexed {
+        let held = column.name == spec.time
+            || column.name == spec.id.name
+            || spec.storage.segment_by.contains(&column.name)
+            || declared.iter().any(|(_, c)| *c == column.name);
+        if !held {
+            declared.push((own_sparse(column.sql), column.name));
+        }
+    }
+    Some(
+        declared
+            .iter()
+            .map(|(kind, column)| format!("{kind}({})", ident(column)))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+}
+
+/// The sparse index TimescaleDB makes of itself for a column with an index,
+/// as 2.21 to 2.31 make them: `minmax` for a time, a date, a `numeric`, a
+/// `smallint`, a float, a boolean, `money`, `bit`, `varbit`, `tsvector`,
+/// `tsquery` and `"char"`; a bloom filter for the rest (`integer`, `bigint`, text, a
+/// uuid, an enum, an interval). A test holds the common types to what the
+/// release makes.
+fn own_sparse(sql: &str) -> &'static str {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let base = bare.split('(').next().unwrap_or(bare).trim();
+    let ordered = crate::query::is_type(base, "timestamp")
+        || crate::query::is_type(base, "time")
+        || matches!(
+            base,
+            "timestamptz"
+                | "timetz"
+                | "date"
+                | "numeric"
+                | "decimal"
+                | "smallint"
+                | "int2"
+                | "real"
+                | "float4"
+                | "double precision"
+                | "float8"
+                | "float"
+                | "boolean"
+                | "bool"
+                // Of these TimescaleDB makes a minmax, and refuses a bloom of
+                // most (no hash).
+                | "money"
+                | "bit"
+                | "varbit"
+                | "bit varying"
+                | "tsvector"
+                | "tsquery"
+                | "\"char\""
+        );
+    if ordered {
+        "minmax"
+    } else {
+        "bloom"
+    }
+}
+
+/// The indexes the migration makes, each its name and its columns, `true`
+/// for descending. A page is the newest rows first, the id breaking ties;
+/// narrowed to one value of an indexed field, or to one `top`, it walks only
+/// those rows.
+pub(crate) fn indexes(spec: &Spec) -> Vec<(String, Vec<(&'static str, bool)>)> {
+    let mut out = vec![(
+        format!("{}_{}_{}_idx", spec.name, spec.time, spec.id.name),
+        vec![(spec.time, true), (spec.id.name, true)],
+    )];
+    let indexed = spec.top.map(|t| t.name).into_iter().chain(
+        spec.fields
+            .iter()
+            .filter(|f| f.indexed)
+            .map(|f| f.column.name),
+    );
+    for field in indexed {
+        let name = format!("{}_{}_{}_idx", spec.name, field, spec.time);
+        if out.iter().any(|(n, _)| *n == name) {
+            continue;
+        }
+        out.push((
+            name,
+            vec![(field, false), (spec.time, true), (spec.id.name, true)],
+        ));
+    }
+    out
+}
+
+/// What a count keeps, in order: its bucket, the columns it is kept by, and
+/// what it counts.
+pub(crate) fn count_columns(spec: &Spec, tier: Tier) -> Vec<&'static str> {
+    let mut out = vec!["bucket"];
+    match tier {
+        Tier::Raw => return Vec::new(),
+        Tier::Hourly | Tier::Daily => {
+            out.extend(spec.counted());
+            out.push("events");
+        }
+        Tier::HourlyTop | Tier::DailyTop => {
+            out.extend(spec.counted_per_top());
+            out.extend(["events", "first_at", "last_at"]);
+        }
+    }
+    out
+}
+
+/// How a count is refreshed: its `end_offset` and how often.
+pub(crate) fn refresh(tier: Tier) -> (&'static str, &'static str) {
+    match tier {
+        Tier::Daily | Tier::DailyTop => ("1 day", "1 hour"),
+        _ => ("1 hour", "5 minutes"),
+    }
 }

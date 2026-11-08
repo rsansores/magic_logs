@@ -1,0 +1,5 @@
+error: `money` has no hash for a bloom filter: `minmax` keeps its range
+  --> tests/derive/fail/bloom_of_money.rs:12:9
+   |
+12 |     pub amount: String,
+   |         ^^^^^^

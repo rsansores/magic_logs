@@ -5,7 +5,7 @@
 // is the host's — through its own data layer, or `useLogFetch`.
 
 import { computed, getCurrentScope, onScopeDispose, ref, watch, type ComputedRef, type Ref } from 'vue'
-import { flag, instant, listOf, text, type Codec } from '../core/codec.js'
+import { between, flag, instant, listOf, text, type Bounds, type Codec } from '../core/codec.js'
 import type { Question } from '../core/contract/types.js'
 import { narrowed as narrows } from '../core/facets.js'
 import {
@@ -28,9 +28,20 @@ export interface FieldOptions {
   key?: string
 }
 
-export interface LogExplorerOptions<F extends string> {
+export interface RangeOptions {
+  /** Which bounds the range may hold: a range read from the store with a
+   * bound it refuses is no range. Any bound when left out. */
+  accept?: (bound: string) => boolean
+  /** The key it is stored under; the field's name when left out. */
+  key?: string
+}
+
+export interface LogExplorerOptions<F extends string, R extends string = never> {
   /** The fields a reader may choose values of, as magic_logs names them. */
   fields: readonly F[] | Record<F, FieldOptions>
+  /** The fields a reader may hold between two bounds, as magic_logs names
+   * them: none when left out. */
+  ranges?: readonly R[] | Record<R, RangeOptions>
   /** The named windows, by how far back each looks in ms: 1h, 24h, 7d, 30d. */
   presets?: Presets
   /** The window shown first; `24h`, or the first preset. */
@@ -48,7 +59,7 @@ export interface LogExplorerOptions<F extends string> {
   longest?: number
 }
 
-export interface LogExplorer<F extends string = string> {
+export interface LogExplorer<F extends string = string, R extends string = string> {
   /** A preset's name, or `custom` for `from` and `to`, as written. */
   preset: Ref<string>
   /** The window in effect, which a control shows as chosen: the preset, or
@@ -59,16 +70,19 @@ export interface LogExplorer<F extends string = string> {
   to: Ref<string>
   /** Each field's chosen values. */
   fields: Record<F, Ref<string[]>>
+  /** Each range's bounds: `{}` when it holds none. */
+  ranges: Record<R, Ref<Bounds>>
   search: Ref<string>
   live: Ref<boolean>
   /** The presets' names, in order. */
   presets: readonly string[]
   fieldNames: readonly F[]
+  rangeNames: readonly R[]
   range: ComputedRef<Range>
   step: ComputedRef<Step>
   /** What every question shares. */
   question: ComputedRef<Question>
-  /** Whether a value is chosen or a search typed. */
+  /** Whether a value is chosen, a range held or a search typed. */
   narrowed: ComputedRef<boolean>
   /** The cursors of the pages read so far: `undefined` for the first, then
    * each page's `next`. A changed question starts again from the newest. */
@@ -91,13 +105,15 @@ export interface LogExplorer<F extends string = string> {
   choose(preset: string): void
   /** Chooses or unchooses one value of `field`. */
   toggle(field: F, value: string): void
-  /** Unchooses every value and clears the search. */
+  /** Unchooses every value, lets go of every range and clears the search. */
   clear(): void
   /** A named window slides to now, and every question is asked again. */
   refresh(): void
 }
 
-export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>): LogExplorer<F> {
+export function useLogExplorer<F extends string, R extends string = never>(
+  options: LogExplorerOptions<F, R>,
+): LogExplorer<F, R> {
   const store = options.store ?? memoryStore
   const presets = options.presets ?? defaultPresets
   const names = Object.keys(presets)
@@ -113,6 +129,10 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     ? Object.fromEntries((options.fields as readonly F[]).map((f) => [f, {}]))
     : (options.fields as Record<F, FieldOptions>)
   const fieldNames = Object.keys(specs) as F[]
+  const rangeSpecs: Record<string, RangeOptions> = Array.isArray(options.ranges)
+    ? Object.fromEntries((options.ranges as readonly R[]).map((r) => [r, {}]))
+    : ((options.ranges ?? {}) as Record<R, RangeOptions>)
+  const rangeNames = Object.keys(rangeSpecs) as R[]
   // Two pieces under one key would write over each other in the store.
   const keys = [
     key('window', 'window'),
@@ -121,7 +141,11 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     key('search', 'q'),
     key('live', 'live'),
     ...fieldNames.map((f) => specs[f]!.key ?? f),
+    ...rangeNames.map((r) => rangeSpecs[r]!.key ?? r),
   ]
+  const both = rangeNames.find((r) => (fieldNames as readonly string[]).includes(r))
+  if (both !== undefined)
+    throw new Error(`"${both}" is a field and a range: a question names it once, as one or the other`)
   const twice = keys.find((k, i) => keys.indexOf(k) !== i)
   if (twice !== undefined)
     throw new Error(`the explorer keeps two things under "${twice}": give one a \`key\` of its own`)
@@ -149,6 +173,9 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   const fields = Object.fromEntries(
     fieldNames.map((f) => [f, store<string[]>(specs[f]!.key ?? f, [], listOf(specs[f]!.accept))]),
   ) as Record<F, Ref<string[]>>
+  const ranges = Object.fromEntries(
+    rangeNames.map((r) => [r, store<Bounds>(rangeSpecs[r]!.key ?? r, {}, between(rangeSpecs[r]!.accept))]),
+  ) as Record<R, Ref<Bounds>>
 
   // The clock a named window ends at: moved on a timer while live, and by
   // `refresh` otherwise, so the window holds still between two questions.
@@ -209,11 +236,18 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
   const question = computed<Question>((before) => {
     const chosen: Record<string, string[]> = {}
     for (const f of fieldNames) if (fields[f].value.length) chosen[f] = [...fields[f].value]
+    const held: Record<string, Bounds> = {}
+    for (const r of rangeNames) {
+      const { min, max } = ranges[r].value
+      // An empty bound is no bound, whatever store held it.
+      if (min || max) held[r] = { ...(min ? { min } : {}), ...(max ? { max } : {}) }
+    }
     const text = search.value.trim()
     const next: Question = {
       from: range.value.from.toISOString(),
       to: range.value.to.toISOString(),
       fields: chosen,
+      ...(Object.keys(held).length ? { ranges: held } : {}),
       ...(text ? { search: text } : {}),
     }
     return before && JSON.stringify(before) === JSON.stringify(next) ? before : next
@@ -230,10 +264,12 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     from,
     to,
     fields,
+    ranges,
     search,
     live,
     presets: names,
     fieldNames,
+    rangeNames,
     range,
     step,
     question,
@@ -279,6 +315,7 @@ export function useLogExplorer<F extends string>(options: LogExplorerOptions<F>)
     },
     clear() {
       for (const f of fieldNames) fields[f].value = []
+      for (const r of rangeNames) ranges[r].value = {}
       search.value = ''
     },
     refresh() {

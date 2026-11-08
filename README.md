@@ -59,7 +59,8 @@ nothing, so it looks like whatever your design system makes of it.
 - PostgreSQL 15 or later, with TimescaleDB 2.21 or later — not 2.22.0 —
   under its community license (the columnstore and continuous aggregates
   are not in the Apache-2.0-only build), preloaded. The migration refuses
-  any other.
+  any other. The sparse indexes a field declares are made from 2.22.1 on;
+  2.21 keeps only those TimescaleDB makes of itself.
 - Rust 1.85 or later; sqlx 0.8.
 - The table, already there — a plain table, not yet a hypertable — with
   its columns and a primary key that holds the time column (a
@@ -87,8 +88,8 @@ newest first, from an index.
 ## What it does, and what it does not
 
 - **One table, counts only.** No joins, no sums or percentiles, no query
-  language, no alerting. A question names a window, values of the table's
-  own fields, and a search.
+  language, no alerting. A question names a window, values or a range of
+  the table's own fields, and a search.
 - **No authorization of its own, and every read governed.** Each relation —
   the rows and every count — is read through a view your SQL writes (the
   `govern` function the migration calls), in a schema of its own. Row-level
@@ -152,35 +153,50 @@ pub struct Reading {
 | struct | `name`, `schema` | the table, in a schema only your own work reads (required) |
 | struct | `view_schema` | where the readable views live; `public` when left out |
 | struct | `chunk`, `compress_after` | `1 day` and `2 days` when left out |
-| struct | `segment_by` | the column a compressed chunk keeps rows together by: the entity most pages are narrowed to |
+| struct | `segment_by` | the columns, comma-separated, a compressed chunk keeps rows together by: what most questions narrow to (an entity, a kind); a filter on them skips whole segments |
+| struct | `stack` | the counted field the histogram is stacked by; the `level` when left out |
 | struct | `search_with` | a function both sides of a search pass through (`f_unaccent`, `lower`) |
 | struct | `crate` | the path to magic_logs, when you re-export it |
 | field | `id`, `time` | the tie-breaker and the time (required) |
-| field | `tenant`, `scope` | kept in every count, and filtered and counted like a `facet`; `scope` is what your views narrow readers by |
-| field | `level` | counted, and what the histogram is stacked by |
+| field | `tenant`, `scope` | kept in every count, and filtered like a `facet`; `scope` is what your views narrow readers by. Alone they make no counts |
+| field | `level` | counted, and what the histogram is stacked by unless `stack` names another |
 | field | `facet` | counted by hour and by day; `per_top` also per `top`; `indexed` (of a `facet` or a `filter`) gets an index of its own |
 | field | `top` | the entity counted on its own, by hour and by day: the grouped view's rows |
 | field | `filter` | a filter the counts do not keep: naming it reads the rows |
+| field | `minmax`, `bloom` | of a column a filter names: what a compressed batch keeps of it, so a filter skips the batches that cannot match — `minmax` its range, for ranges; `bloom` its values, for equality. Made on TimescaleDB 2.22.1 and later, beside those TimescaleDB would have made of each indexed column; those it makes of several columns of one index (the primary key's among them) and for an index of yours are lost. A bloom serves a filter of one value on every release, of several from 2.31 |
 | field | `search` | searched as text, every such column |
-| field | `sql = "…"` | the SQL type a filter's values are cast to, when the Rust type does not say (an enum) |
+| field | `sql = "…"` | the SQL type a filter's values are cast to, when the Rust type does not say (an enum): the type itself, not a domain over it, which the checks below cannot see through |
 
 A field with no `#[log(…)]` is still read by a page (it is a column of the
 row), and nothing else. The derive refuses what the migration could not
 make: `schema` and `view_schema` the same (a view over itself), a counted
 column named `bucket`, `events`, `first_at` or `last_at` (the counts' own),
-and a relation or index name past PostgreSQL's 63 bytes. A field named
-`r#type` is the column `type`.
+a relation or index name past PostgreSQL's 63 bytes, a sparse index of a
+segment_by column, of the time or of the id (a segment holds one value of
+the first, and is ordered by the others), a `bloom` of a type with no hash
+(`money`, a bit string, a text search type), either sparse index of a type
+with neither order nor hash (`json`, `xml`, a geometric type), a `$` in
+`name` or `schema`, a `facet` that is the tenant or the scope, and a
+`stack` that is not counted.
+A field named `r#type` is the column `type`.
+
+A table that counts nothing — no `level`, no `facet`, no `top` — is stored
+as its rows alone: the hypertable, its indexes, the columnstore and the
+view, no counts. Every question reads its rows.
 
 ## Setting up
 
 `migration` prints the SQL, one transaction's worth, for the table as it
 stands: the hypertable, the indexes a page reads (`time DESC, id DESC`,
 and one per `indexed` field and the `top`), the columnstore and its
-policy, the four counts with their refresh and compression policies —
-and, for each of the five relations (the table and its counts), whatever
-`govern` writes. Run it from your own
+policy, its sparse indexes, the four counts with their refresh and
+compression policies — none for a table that counts nothing — and, for
+each relation (the table and its counts), whatever `govern` writes. Run it from your own
 migrations; the [golden copy](https://github.com/rsansores/magic_logs/blob/main/magic_logs/tests/golden/migration.sql) shows
-what it writes.
+what it writes. A released migration is never edited, so `drift` reads the
+database against the declaration, to run in a test after your migrations:
+one `Drift` for each way it differs — the chunks, the columnstore, an index,
+a count, a policy, a view — and none for a table as declared.
 
 ```rust
 use magic_logs::Governed;
@@ -240,24 +256,31 @@ let groups: Vec<Group> = grouped(&Event::SPEC, &filter, "kind", 50)?
     .await?;
 ```
 
+A field filtered by a range is `with_condition(field, Condition::Between {
+min, max })`, either bound left out; the counts answer it when they keep
+the field. `histogram` stacks by the table's `stack`; `histogram_by` by any
+field, or by none.
+
 | question | reads |
 |---|---|
 | `page` | the rows, from `(time DESC, id DESC)`, or a field's own index |
-| `histogram` | the daily counts for a step of whole days, the hourly ones for whole hours (per `top` when it names the `top`); the rows for a finer step; each bar its bucket, whole |
+| `histogram`, `histogram_by` | the daily counts for a step of whole days, the hourly ones for whole hours (per `top` when it names the `top`); the rows for a finer step, or a stack no count keeps; each bar its bucket, whole |
 | `facets` | exact, in parts: whole days from the daily counts, whole hours from the hourly, the edge minutes from the rows; the rows alone for what no count keeps |
 | `grouped` | exact, in the same parts of the counts per `top`; the rows alone for what they do not keep |
 
 A refused question — a window that ends before it begins, a field the table
 does not have, one named twice, a search of a table that searches nothing,
 a step shorter than a microsecond or not whole microseconds, a negative
-limit — is an
+limit, a value a `bit(n)` or `"char"` column cannot hold whole — is an
 [`Error`](https://docs.rs/magic_logs/latest/magic_logs/enum.Error.html),
 before any SQL is written: answer it as the caller's mistake. A value is
 sent as text and cast by the database to the column's type: one that does
 not read (`not-a-uuid` for a `uuid`, a number out of range, a date that is
 not one) is refused there with a data exception, SQLSTATE class `22`
 (`22P02`, `22003`, `22007`, …), which is the caller's mistake too. A search is words, as typed: a row
-matches when every word is in one of its searched columns, in any order;
+matches when every word is in one of its searched columns, in any order.
+A facet counts its field under every other field's filter but its own,
+a range of it included;
 `%` and `_` match themselves.
 
 With the `serde` feature, `Bucket`, `FacetCount` and `Group` serialize as
@@ -296,7 +319,7 @@ has the rest, and what each number was before the fix it measures.
 
 ## Status
 
-0.1: the first release. Until 1.0 a minor version may break the API, and
+0.2. Until 1.0 a minor version may break the API, and
 the changelog says how; the SQL the migration writes changes only with a
 version that says what to run on a table made by the one before.
 

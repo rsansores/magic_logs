@@ -18,8 +18,12 @@ pub struct Spec {
     pub tenant: Option<&'static str>,
     /// The column the governed views narrow a reader by, kept in every count.
     pub scope: Option<&'static str>,
-    /// The ordered column the histogram is stacked by.
+    /// The ordered column rows are ranked by: counted, filtered, and what the
+    /// histogram is stacked by unless `stack` names another.
     pub level: Option<Column>,
+    /// The counted column the histogram is stacked by when a question names
+    /// none: `stack = "…"`, or else the `level`.
+    pub stack: Option<Column>,
     /// The entity counted on its own, by hour and by day: the grouped view's rows.
     pub top: Option<Column>,
     /// Every column a filter may name, in declaration order.
@@ -54,6 +58,28 @@ pub struct Field {
     /// Given an index of its own, `(field, time DESC, id DESC)`: a page
     /// narrowed to a rare value of it does not walk the whole range.
     pub indexed: bool,
+    /// What a compressed chunk keeps of it per batch, so a filter on it skips
+    /// the batches that cannot match without decompressing them.
+    pub sparse: Option<Sparse>,
+}
+
+/// What a compressed chunk keeps of a column per batch of rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sparse {
+    /// Its smallest and largest value: for ranges, of an ordered column.
+    MinMax,
+    /// A bloom filter of its values: for equality, of a column of many.
+    Bloom,
+}
+
+impl Sparse {
+    /// The name TimescaleDB's `sparse_index` setting gives it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Sparse::MinMax => "minmax",
+            Sparse::Bloom => "bloom",
+        }
+    }
 }
 
 /// Chunks, compression and the counts' refresh.
@@ -63,8 +89,9 @@ pub struct Storage {
     pub chunk: &'static str,
     /// How old a chunk is when it is compressed.
     pub compress_after: &'static str,
-    /// The column a compressed chunk keeps its rows together by.
-    pub segment_by: Option<&'static str>,
+    /// The columns a compressed chunk keeps its rows together by, in order:
+    /// a filter on them skips whole segments. Empty is no segmenting.
+    pub segment_by: &'static [&'static str],
 }
 
 /// A table the counts are read from.
@@ -106,8 +133,27 @@ impl Spec {
             .unwrap_or("top")
     }
 
-    /// Every tier this table has: the counts per `top` only with a `top`.
+    /// Whether the table is counted: it counts something, a `level`, a
+    /// `facet` or a `top`. A table that does not is stored and read as its
+    /// rows alone.
+    pub fn counts(&self) -> bool {
+        self.level.is_some()
+            || self.top.is_some()
+            || self.fields.iter().any(|f| f.counted && self.is_facet(f))
+    }
+
+    /// Whether `field` is counted for itself, not only as the tenant or the
+    /// scope every count keeps.
+    fn is_facet(&self, field: &Field) -> bool {
+        Some(field.column.name) != self.tenant && Some(field.column.name) != self.scope
+    }
+
+    /// Every tier this table has: the rows alone for a table that counts
+    /// nothing, the counts per `top` only with a `top`.
     pub fn tiers(&self) -> Vec<Tier> {
+        if !self.counts() {
+            return vec![Tier::Raw];
+        }
         let mut tiers = vec![Tier::Raw, Tier::Hourly, Tier::Daily];
         if self.top.is_some() {
             tiers.push(Tier::HourlyTop);
