@@ -45,3 +45,15 @@ curl -H 'x-zones: Harbor' "localhost:3001/api/facets?from=$from&to=$to"
 (`127.0.0.1:3001` by default) is where it listens. The example reaches the
 crate in this repository by path; a copy outside it leaves `path` out of
 `Cargo.toml`.
+
+## Ranges and positions
+
+A field held between two bounds is `field=min..max` in the query string,
+either side empty, as the explorer's `between` writes it: `odometer=10000..`
+on `/api/page`, `/api/histogram`, `/api/facets` and `/api/grouped`.
+`/api/positions?from=…&to=…&unit=truck-04&speed=100..` pages the trucks'
+positions, a table stored and read as its rows, counted by nothing.
+
+On a database made before the positions, the server adds what is new at
+start and prints whatever `drift` finds: a table made by magic_logs 0.1 has
+no sparse indexes until the `ALTER`s the changelog gives are run.

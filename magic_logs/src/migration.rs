@@ -313,8 +313,8 @@ pub(crate) fn sparse_index(spec: &Spec) -> Option<String> {
 
 /// The sparse index TimescaleDB makes of itself for a column with an index,
 /// as 2.21 to 2.31 make them: `minmax` for a time, a date, a `numeric`, a
-/// `smallint`, a float, a boolean and a type with no hash (`money`, `bit`,
-/// `tsvector`); a bloom filter for the rest (`integer`, `bigint`, text, a
+/// `smallint`, a float, a boolean, `money`, `bit`, `varbit`, `tsvector`,
+/// `tsquery` and `"char"`; a bloom filter for the rest (`integer`, `bigint`, text, a
 /// uuid, an enum, an interval). A test holds the common types to what the
 /// release makes.
 fn own_sparse(sql: &str) -> &'static str {
@@ -339,12 +339,14 @@ fn own_sparse(sql: &str) -> &'static str {
                 | "float"
                 | "boolean"
                 | "bool"
-                // Ordered, with no hash to build a bloom filter of.
+                // Of these TimescaleDB makes a minmax, and refuses a bloom of
+                // most (no hash).
                 | "money"
                 | "bit"
                 | "varbit"
                 | "bit varying"
                 | "tsvector"
+                | "tsquery"
                 | "\"char\""
         );
     if ordered {

@@ -1331,7 +1331,8 @@ async fn drift_names_every_way_the_database_left_the_declaration(pool: PgPool) {
 
     let sparse = declares_sparse(&pool).await;
     sqlx::raw_sql(&format!(
-        "DROP INDEX private.events_kind_at_idx; \
+        "CREATE INDEX hosts_own ON private.events (operator) INCLUDE (kind); \
+         DROP INDEX private.events_kind_at_idx; \
          SELECT set_chunk_time_interval('private.events', INTERVAL '2 days'); \
          ALTER TABLE private.events SET (timescaledb.segmentby = 'zone_id'); \
          {sparse} \

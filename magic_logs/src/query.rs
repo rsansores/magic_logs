@@ -631,9 +631,10 @@ pub fn grouped(
 
 /// `sql` as a type that holds any value of it, so a cast cuts and rounds
 /// nothing: without its typmods (`numeric(15,3)` is `numeric`, `varchar(3)`
-/// `varchar`, `timestamp(3) with time zone` `timestamp with time zone`), and
-/// `char(n)` as `bpchar`, `bit(n)` as `varbit` — bare, they hold one. Any
-/// other is left as it is.
+/// `varchar`, `timestamp(3) with time zone` `timestamp with time zone`, an
+/// `interval day` an `interval`), and `char(n)` as `bpchar` — bare, it holds
+/// one character. Any other is left as it is: a `bit(n)` refuses a value of
+/// another length rather than cutting it.
 fn bare_type(sql: &str) -> String {
     let stripped = strip_typmods(sql);
     let lower = stripped.to_ascii_lowercase();
@@ -641,8 +642,8 @@ fn bare_type(sql: &str) -> String {
     match base {
         // Bare, these are one character or one bit: their unbounded kin.
         "char" | "character" | "bpchar" => "bpchar".to_owned(),
-        "bit" | "varbit" | "bit varying" => "varbit".to_owned(),
-        "numeric" | "decimal" | "varchar" | "character varying" | "interval" => stripped,
+        "numeric" | "decimal" | "varchar" | "character varying" => stripped,
+        _ if base.starts_with("interval") => "interval".to_owned(),
         _ if base.starts_with("timestamp") || base.starts_with("time") => stripped,
         _ => sql.to_owned(),
     }
@@ -688,6 +689,7 @@ fn immutable_input(sql: &str) -> bool {
             | "varchar"
             | "character varying"
             | "bpchar"
+            | "bit"
             | "varbit"
             | "uuid"
             | "boolean"

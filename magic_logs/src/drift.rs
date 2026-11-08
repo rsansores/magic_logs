@@ -100,7 +100,7 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
            FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid \
           CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, n) \
            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum \
-          WHERE i.indrelid = (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE k.n <= i.indnkeyatts AND i.indrelid = (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
                                WHERE c.relname = $2 AND n.nspname = $1) \
           GROUP BY c.relname",
     )

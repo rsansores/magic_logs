@@ -1,13 +1,23 @@
 // The fleet example's server (examples/fleet), asked through the dev
 // server's proxy: what a host's fetch functions look like.
 
-import type { BucketRow, FacetCountRow, GroupRow, Page, Question, Step } from '../src/index.js'
+import {
+  between,
+  type BucketRow,
+  type FacetCountRow,
+  type GroupRow,
+  type Page,
+  type Question,
+  type Step,
+} from '../src/index.js'
 import type { Event } from './server.js'
 
 function query(q: Question, extra: Record<string, string | undefined> = {}) {
   const params = new URLSearchParams({ from: q.from, to: q.to })
   // One parameter per value: a value may hold a comma.
   for (const [field, values] of Object.entries(q.fields)) for (const v of values) params.append(field, v)
+  // A range as the fleet reads it: `min..max`, either side empty.
+  for (const [field, bounds] of Object.entries(q.ranges ?? {})) params.set(field, between().serialize(bounds))
   if (q.search) params.set('search', q.search)
   for (const [key, value] of Object.entries(extra)) if (value) params.set(key, value)
   return params

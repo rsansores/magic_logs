@@ -264,6 +264,12 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 )
             })?,
         };
+        if flags.bloom && no_hash(&sql) {
+            return Err(syn::Error::new(
+                at,
+                format!("`{sql}` has no hash for a bloom filter: `minmax` keeps its range"),
+            ));
+        }
         // The column's name: `r#type` is the column `type`.
         let name = field
             .ident
@@ -502,6 +508,17 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             };
         }
     })
+}
+
+/// Whether `sql` is a type TimescaleDB builds no bloom filter of.
+fn no_hash(sql: &str) -> bool {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let base = bare.split('(').next().unwrap_or(bare).trim();
+    matches!(
+        base,
+        "money" | "bit" | "varbit" | "bit varying" | "tsvector" | "tsquery"
+    )
 }
 
 /// The SQL type a Rust type is read as, through an `Option`.
