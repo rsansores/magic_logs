@@ -56,11 +56,12 @@ nothing, so it looks like whatever your design system makes of it.
 
 ## Requirements
 
-- PostgreSQL 15 or later, with TimescaleDB 2.21 or later — not 2.22.0 —
+- PostgreSQL 15 or later, with TimescaleDB 2.21, or 2.24 or later,
   under its community license (the columnstore and continuous aggregates
   are not in the Apache-2.0-only build), preloaded. The migration refuses
-  any other. The sparse indexes a field declares are made from 2.22.1 on;
-  2.21 keeps only those TimescaleDB makes of itself.
+  any other: 2.22 and 2.23 refuse the refresh of a count over a count, and
+  2.22.0 loses counts. The sparse indexes a field declares are made from
+  2.24 on; 2.21 keeps only those TimescaleDB makes of itself.
 - Rust 1.85 or later; sqlx 0.8.
 - The table, already there — a plain table, not yet a hypertable — with
   its columns and a primary key that holds the time column (a
@@ -163,7 +164,7 @@ pub struct Reading {
 | field | `facet` | counted by hour and by day; `per_top` also per `top`; `indexed` (of a `facet` or a `filter`) gets an index of its own |
 | field | `top` | the entity counted on its own, by hour and by day: the grouped view's rows |
 | field | `filter` | a filter the counts do not keep: naming it reads the rows |
-| field | `minmax`, `bloom` | of a column a filter names: what a compressed batch keeps of it, so a filter skips the batches that cannot match — `minmax` its range, for ranges; `bloom` its values, for equality. Made on TimescaleDB 2.22 and later |
+| field | `minmax`, `bloom` | of a column a filter names: what a compressed batch keeps of it, so a filter skips the batches that cannot match — `minmax` its range, for ranges; `bloom` its values, for equality. Made on TimescaleDB 2.24 and later |
 | field | `search` | searched as text, every such column |
 | field | `sql = "…"` | the SQL type a filter's values are cast to, when the Rust type does not say (an enum) |
 

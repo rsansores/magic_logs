@@ -3,9 +3,10 @@
 DO $$
 DECLARE
     v text := (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');
+    n int[] := (regexp_match(v, '^(\d+)\.(\d+)'))::int[];
 BEGIN
-    IF (regexp_match(v, '^(\d+)\.(\d+)'))::int[] < ARRAY[2, 21] OR v = '2.22.0' THEN
-        RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later, but not 2.22.0; this database has %', v;
+    IF n < ARRAY[2, 21] OR (n >= ARRAY[2, 22] AND n < ARRAY[2, 24]) THEN
+        RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21, or 2.24 or later; this database has %', v;
     END IF;
 END
 $$;

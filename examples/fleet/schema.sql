@@ -13,9 +13,10 @@ CREATE TABLE IF NOT EXISTS fleet.events (
     zone    text        NOT NULL,
     unit    text        NOT NULL,
     message text        NOT NULL,
-    odometer bigint,
     PRIMARY KEY (id, at)
 );
+-- Added after the first release: a database made before it gains the column.
+ALTER TABLE fleet.events ADD COLUMN IF NOT EXISTS odometer bigint;
 
 -- Where each truck is, every few seconds: kept and read, never counted.
 CREATE TABLE IF NOT EXISTS fleet.positions (

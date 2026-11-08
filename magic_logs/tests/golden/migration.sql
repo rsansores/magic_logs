@@ -3,9 +3,10 @@
 DO $$
 DECLARE
     v text := (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');
+    n int[] := (regexp_match(v, '^(\d+)\.(\d+)'))::int[];
 BEGIN
-    IF (regexp_match(v, '^(\d+)\.(\d+)'))::int[] < ARRAY[2, 21] OR v = '2.22.0' THEN
-        RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later, but not 2.22.0; this database has %', v;
+    IF n < ARRAY[2, 21] OR (n >= ARRAY[2, 22] AND n < ARRAY[2, 24]) THEN
+        RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21, or 2.24 or later; this database has %', v;
     END IF;
 END
 $$;
@@ -24,13 +25,13 @@ ALTER TABLE "telemetry"."events" SET (
 );
 CALL add_columnstore_policy('"telemetry"."events"', after => INTERVAL '2 days');
 
-DO $$
+DO $ml$
 BEGIN
     IF (regexp_match((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '^(\d+)\.(\d+)'))::int[] >= ARRAY[2, 22] THEN
         EXECUTE 'ALTER TABLE "telemetry"."events" SET (timescaledb.sparse_index = ''minmax("volume"), bloom("serial")'')';
     END IF;
 END
-$$;
+$ml$;
 
 CREATE MATERIALIZED VIEW "telemetry"."events_hourly"
 WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS

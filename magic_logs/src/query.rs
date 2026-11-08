@@ -360,23 +360,35 @@ fn push_where(
         let Some(field) = spec.field(name) else {
             continue;
         };
-        // The values are cast once, in an InitPlan: a cast from text that is
-        // not immutable (to a timestamp) is no constant to TimescaleDB's
-        // filter on compressed chunks, which then refuses it.
+        // A cast from text that is not immutable (to a timestamp, an enum) is
+        // no constant to TimescaleDB's filter on compressed chunks, which then
+        // refuses it: such values are cast once, in an InitPlan. One that is
+        // (a number, text, a uuid) is cast in place, which keeps the filter
+        // vectorized on compressed batches; an InitPlan's value is not.
         let sql = field.column.sql;
+        let (open, close) = if immutable_input(sql) {
+            ("", "")
+        } else {
+            ("(SELECT ", ")")
+        };
         match condition {
             Condition::AnyOf(values) if !values.is_empty() => {
-                qb.push(format!(" AND {} = ANY((SELECT ", ident(name)));
+                qb.push(format!(" AND {} = ANY({open}", ident(name)));
                 qb.push_bind(values.clone());
-                qb.push(format!("::{sql}[])::{sql}[])"));
+                let cast = if close.is_empty() {
+                    format!("::{sql}[]")
+                } else {
+                    format!("::{sql}[])::{sql}[]")
+                };
+                qb.push(format!("{cast})"));
             }
             Condition::AnyOf(_) => {}
             Condition::Between { min, max } => {
                 for (bound, op) in [(min, ">="), (max, "<=")] {
                     if let Some(value) = bound {
-                        qb.push(format!(" AND {} {op} (SELECT ", ident(name)));
+                        qb.push(format!(" AND {} {op} {open}", ident(name)));
                         qb.push_bind(value.clone());
-                        qb.push(format!("::{sql})"));
+                        qb.push(format!("::{sql}{close}"));
                     }
                 }
             }
@@ -604,6 +616,37 @@ pub fn grouped(
     qb.push(") AS parts GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT ");
     qb.push_bind(limit);
     Ok(qb)
+}
+
+/// Whether text is read as `sql` the same way whatever the session's
+/// settings: a number, text, a uuid, a boolean. A timestamp reads by the
+/// time zone and the date style, an enum by its catalog: not.
+fn immutable_input(sql: &str) -> bool {
+    let lower = sql.trim().to_ascii_lowercase();
+    let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
+    let bare = bare.split('(').next().unwrap_or(bare).trim();
+    matches!(
+        bare,
+        "smallint"
+            | "integer"
+            | "int"
+            | "bigint"
+            | "int2"
+            | "int4"
+            | "int8"
+            | "numeric"
+            | "decimal"
+            | "real"
+            | "double precision"
+            | "float4"
+            | "float8"
+            | "text"
+            | "varchar"
+            | "character varying"
+            | "uuid"
+            | "boolean"
+            | "bool"
+    )
 }
 
 /// How a stretch counts its rows: one by one, or by the counts' sums.

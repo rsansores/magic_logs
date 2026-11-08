@@ -137,21 +137,24 @@ async fn set_up(pool: &PgPool) -> Result<(), Error> {
     sqlx::raw_sql(include_str!("../schema.sql"))
         .execute(pool)
         .await?;
-    let made: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM timescaledb_information.hypertables \
-          WHERE hypertable_schema = 'fleet' AND hypertable_name = 'events')",
-    )
-    .fetch_one(pool)
-    .await?;
-    if !made {
-        let mut tx = pool.begin().await?;
-        sqlx::raw_sql(&migration(&Event::SPEC, govern))
-            .execute(&mut *tx)
-            .await?;
-        sqlx::raw_sql(&migration(&Position::SPEC, govern))
-            .execute(&mut *tx)
-            .await?;
-        tx.commit().await?;
+    // Each table made a log table once: a database a build before the
+    // positions made has events, and no positions yet.
+    for spec in [Event::SPEC, Position::SPEC] {
+        let made: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM timescaledb_information.hypertables \
+              WHERE hypertable_schema = $1 AND hypertable_name = $2)",
+        )
+        .bind(spec.schema)
+        .bind(spec.name)
+        .fetch_one(pool)
+        .await?;
+        if !made {
+            let mut tx = pool.begin().await?;
+            sqlx::raw_sql(&migration(&spec, govern))
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+        }
     }
     // A table made by an older build is the one the code declares, or says why not.
     let mut conn = pool.acquire().await?;
@@ -280,13 +283,32 @@ fn filter_of(q: &Params, spec: &Spec) -> Result<Filter, Refused> {
 }
 
 /// `min..max`, either side empty, as the explorer's `between` writes it: a
-/// bound that holds `..` or ends in a dot is escaped there, which bounds of
-/// numbers never are.
+/// backslash keeps the character after it, so a bound may hold `..`.
 fn between(field: &str, raw: &str) -> Result<Condition, Refused> {
-    let (min, max) = raw
-        .split_once("..")
-        .ok_or_else(|| Refused::Question(format!("`{field}` is a range: `min..max`")))?;
-    let bound = |b: &str| (!b.is_empty()).then(|| b.to_owned());
+    let (mut min, mut max, mut past) = (String::new(), String::new(), false);
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        let c = match c {
+            '\\' => chars.next().unwrap_or(c),
+            '.' if !past && chars.peek() == Some(&'.') => {
+                chars.next();
+                past = true;
+                continue;
+            }
+            _ => c,
+        };
+        if past {
+            max.push(c)
+        } else {
+            min.push(c)
+        }
+    }
+    if !past {
+        return Err(Refused::Question(format!(
+            "`{field}` is a range: `min..max`"
+        )));
+    }
+    let bound = |b: String| (!b.is_empty()).then_some(b);
     Ok(Condition::Between {
         min: bound(min),
         max: bound(max),

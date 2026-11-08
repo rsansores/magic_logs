@@ -90,11 +90,13 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
     // Older releases refresh compressed counts under TimescaleDB's cap on
     // rows decompressed by one statement: past it, a late row's refresh
     // fails in the background, every time. 2.22.0 loses the buckets of a
-    // refresh interrupted mid-batch, for good. Refused here, by name.
+    // refresh interrupted mid-batch, for good, and 2.22 and 2.23 refuse a
+    // refresh policy on a count of a count. Refused here, by name.
     push(
-        "DO $$\nDECLARE\n    v text := (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');\n\
-         BEGIN\n    IF (regexp_match(v, '^(\\d+)\\.(\\d+)'))::int[] < ARRAY[2, 21] OR v = '2.22.0' THEN\n        \
-         RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21 or later, but not 2.22.0; this database has %', v;\n    \
+        "DO $$\nDECLARE\n    v text := (SELECT extversion FROM pg_extension WHERE extname = 'timescaledb');\n    \
+         n int[] := (regexp_match(v, '^(\\d+)\\.(\\d+)'))::int[];\n\
+         BEGIN\n    IF n < ARRAY[2, 21] OR (n >= ARRAY[2, 22] AND n < ARRAY[2, 24]) THEN\n        \
+         RAISE EXCEPTION 'magic_logs needs TimescaleDB 2.21, or 2.24 or later; this database has %', v;\n    \
          END IF;\nEND\n$$;"
             .to_owned(),
     );
@@ -134,12 +136,14 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         literal(st.compress_after)
     ));
     if let Some(sparse) = sparse_index(spec) {
-        // TimescaleDB declares a column's sparse index from 2.22 on; on 2.21
+        // TimescaleDB declares a column's sparse index from 2.22 on (2.24 for
+        // magic_logs, which refuses 2.22 and 2.23); on 2.21
         // a chunk keeps only those it makes of itself, and `drift` says
-        // what is missing once the database runs a release that declares them.
+        // what is missing once the database runs a release that declares
+        // them. Quoted apart, as the table's name may hold `$$`.
         push(format!(
-            "DO $$\nBEGIN\n    IF (regexp_match((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '^(\\d+)\\.(\\d+)'))::int[] >= ARRAY[2, 22] THEN\n        \
-             EXECUTE {};\n    END IF;\nEND\n$$;",
+            "DO $ml$\nBEGIN\n    IF (regexp_match((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '^(\\d+)\\.(\\d+)'))::int[] >= ARRAY[2, 22] THEN\n        \
+             EXECUTE {};\n    END IF;\nEND\n$ml$;",
             literal(&format!(
                 "ALTER TABLE {table} SET (timescaledb.sparse_index = {})",
                 literal(&sparse)
@@ -271,17 +275,38 @@ pub(crate) fn segmented(spec: &Spec) -> String {
 }
 
 /// The table's `sparse_index` setting: each field's, in declaration order;
-/// none when no field declares one.
+/// none when no field declares one. Declaring any takes the place of those
+/// TimescaleDB makes of itself — a bloom filter of each column with an index
+/// — so those are declared too, after the fields' own: the `top`'s and every
+/// `indexed` field's, unless a segment holds one value of it already.
 pub(crate) fn sparse_index(spec: &Spec) -> Option<String> {
-    let declared: Vec<String> = spec
+    let mut declared: Vec<(&str, &str)> = spec
         .fields
         .iter()
-        .filter_map(|f| {
-            f.sparse
-                .map(|kind| format!("{}({})", kind.name(), ident(f.column.name)))
-        })
+        .filter_map(|f| f.sparse.map(|kind| (kind.name(), f.column.name)))
         .collect();
-    (!declared.is_empty()).then(|| declared.join(", "))
+    if declared.is_empty() {
+        return None;
+    }
+    let indexed = spec.top.map(|t| t.name).into_iter().chain(
+        spec.fields
+            .iter()
+            .filter(|f| f.indexed)
+            .map(|f| f.column.name),
+    );
+    for column in indexed {
+        if !spec.storage.segment_by.contains(&column) && !declared.iter().any(|(_, c)| *c == column)
+        {
+            declared.push(("bloom", column));
+        }
+    }
+    Some(
+        declared
+            .iter()
+            .map(|(kind, column)| format!("{kind}({})", ident(column)))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }
 
 /// The indexes the migration makes, each its name and its columns, `true`

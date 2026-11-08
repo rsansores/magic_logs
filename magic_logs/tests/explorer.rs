@@ -16,7 +16,7 @@ use uuid::Uuid;
     schema = "private",
     chunk = "1 day",
     compress_after = "2 days",
-    segment_by = "unit_id",
+    segment_by = "unit_id, kind",
     search_with = "fold"
 )]
 struct Event {
@@ -34,7 +34,7 @@ struct Event {
     kind: String,
     #[log(top)]
     unit_id: Uuid,
-    #[log(filter)]
+    #[log(filter, bloom)]
     operator: Option<String>,
     #[log(filter, minmax)]
     seen_at: Option<DateTime<Utc>>,
@@ -1376,4 +1376,94 @@ async fn drift_names_every_way_the_database_left_the_declaration(pool: PgPool) {
         chunk.to_string(),
         "private.events: chunk is 2 days, declared 1 day"
     );
+}
+
+/// A stack the counts keep is read from them, alike; one they do not keep,
+/// with the `top` named, reads the rows; an unknown one is refused.
+#[sqlx::test(migrations = false)]
+async fn a_stack_is_read_from_the_counts_that_keep_it(pool: PgPool) {
+    setup(&pool).await;
+    let spec = Event::SPEC;
+    let one_unit = window(4).with("unit_id", ["00000000-0000-0000-0000-0000000000a1"]);
+    assert_eq!(
+        magic_logs::histogram_tier(&spec, &one_unit, Duration::days(1), Some("operator")),
+        Tier::Raw
+    );
+    for (filter, stack, tier) in [
+        (window(4), Some("unit_id"), Tier::DailyTop),
+        (one_unit.clone(), Some("kind"), Tier::DailyTop),
+    ] {
+        assert_eq!(
+            magic_logs::histogram_tier(&spec, &filter, Duration::days(1), stack),
+            tier
+        );
+        let ask = |f: &Filter| histogram_by(&spec, f, Duration::days(1), stack).unwrap();
+        let counted: Vec<Bucket> = ask(&filter)
+            .build_query_as()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        let raw: Vec<Bucket> = ask(&filter.clone().search("unit"))
+            .build_query_as()
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(counted, raw, "{filter:?} stacked by {stack:?}");
+        assert!(!counted.is_empty());
+    }
+    assert!(matches!(
+        histogram_by(&spec, &window(1), Duration::hours(1), Some("nothing")),
+        Err(magic_logs::Error::UnknownField(f)) if f == "nothing"
+    ));
+}
+
+/// A table made with counts whose declaration now keeps fewer: every count
+/// it no longer declares is named, a count of a count among them.
+#[sqlx::test(migrations = false)]
+async fn drift_names_every_count_a_narrower_declaration_does_not_make(pool: PgPool) {
+    setup(&pool).await;
+    let full = Event::SPEC;
+    let only_filtered: &'static [magic_logs::Field] = Box::leak(
+        full.fields
+            .iter()
+            .filter(|f| !f.counted && Some(f.column.name) != full.top.map(|t| t.name))
+            .copied()
+            .collect::<Vec<_>>()
+            .into_boxed_slice(),
+    );
+    let mut nothing = full;
+    nothing.level = None;
+    nothing.stack = None;
+    nothing.top = None;
+    nothing.tenant = None;
+    nothing.scope = None;
+    nothing.fields = only_filtered;
+    nothing.storage.segment_by = &[];
+    let mut no_top = full;
+    no_top.top = None;
+    let mut conn = pool.acquire().await.unwrap();
+    for (spec, extra) in [
+        (
+            nothing,
+            &[
+                "events_hourly",
+                "events_daily",
+                "events_hourly_unit",
+                "events_daily_unit",
+            ][..],
+        ),
+        (no_top, &["events_hourly_unit", "events_daily_unit"][..]),
+    ] {
+        let mut named: Vec<String> = drift(&mut conn, &spec)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|d| d.what == "count")
+            .map(|d| d.relation)
+            .collect();
+        named.sort();
+        let mut expected: Vec<String> = extra.iter().map(|c| format!("private.{c}")).collect();
+        expected.sort();
+        assert_eq!(named, expected);
+    }
 }

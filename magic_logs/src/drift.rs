@@ -34,14 +34,15 @@ impl std::fmt::Display for Drift {
 /// Every way the database `conn` reads differs from `spec`, none when it
 /// holds the table as declared: the hypertable and its chunks, the
 /// columnstore and its policy — the segments, the order and, on TimescaleDB
-/// 2.22 and later, the sparse indexes —, the indexes the migration makes,
+/// 2.24 and later, the sparse indexes —, the indexes the migration makes,
 /// every count with its columns, its refresh and its columnstore, a count
-/// the table should not have, and a view of every relation in
+/// over the table, or over one of its counts, that the declaration does not
+/// make — the host's own included —, and a view of every relation in
 /// [`Spec::view_schema`]. An index or a view of the host's own beyond these
 /// is not a difference; what a view reads is the host's.
 ///
-/// Read by the connection's role: one that cannot see the table's schema
-/// sees nothing, and is told every relation is missing.
+/// Read by the connection's role: one that cannot see the table is told it
+/// is no hypertable, and nothing else.
 pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, sqlx::Error> {
     let mut out = Vec::new();
     let mut differs = |relation: &str, what: &str, declared: String, found: String| {
@@ -99,8 +100,8 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
            FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid \
           CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, n) \
            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum \
-          WHERE i.indrelid = (SELECT oid FROM pg_class \
-                               WHERE relname = $2 AND relnamespace = $1::regnamespace) \
+          WHERE i.indrelid = (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                               WHERE c.relname = $2 AND n.nspname = $1) \
           GROUP BY c.relname",
     )
     .bind(spec.schema)
@@ -118,26 +119,25 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
         differs(&table, &format!("index {name}"), declared, held);
     }
 
-    let counts: Vec<(String, bool, String, String)> = sqlx::query_as(
-        "WITH declared AS (SELECT * FROM timescaledb_information.continuous_aggregates \
-                            WHERE view_schema = $1 AND view_name = ANY($3)) \
-         SELECT view_name::text, materialized_only, materialization_hypertable_schema::text, \
-                materialization_hypertable_name::text \
-           FROM timescaledb_information.continuous_aggregates \
-          WHERE (hypertable_schema, hypertable_name) IN (($1, $2)) \
-             OR (hypertable_schema, hypertable_name) IN \
-                (SELECT materialization_hypertable_schema, materialization_hypertable_name FROM declared) \
-             OR (view_schema, view_name) IN (SELECT view_schema, view_name FROM declared)",
+    // Every count over the table, and over those counts, however deep: what
+    // a count is read from is its source's materialization hypertable.
+    let counts: Vec<(String, String, bool, String, String)> = sqlx::query_as(
+        "WITH RECURSIVE tree AS ( \
+             SELECT view_schema, view_name, materialized_only, \
+                    materialization_hypertable_schema AS mat_schema, \
+                    materialization_hypertable_name AS mat_name \
+               FROM timescaledb_information.continuous_aggregates \
+              WHERE hypertable_schema = $1 AND hypertable_name = $2 \
+             UNION \
+             SELECT c.view_schema, c.view_name, c.materialized_only, \
+                    c.materialization_hypertable_schema, c.materialization_hypertable_name \
+               FROM timescaledb_information.continuous_aggregates c \
+               JOIN tree t ON c.hypertable_schema = t.mat_schema AND c.hypertable_name = t.mat_name) \
+         SELECT view_schema::text, view_name::text, materialized_only, mat_schema::text, mat_name::text \
+           FROM tree",
     )
     .bind(spec.schema)
     .bind(spec.name)
-    .bind(
-        spec.tiers()
-            .into_iter()
-            .filter(|t| *t != Tier::Raw)
-            .map(|t| spec.relation(t))
-            .collect::<Vec<_>>(),
-    )
     .fetch_all(&mut *conn)
     .await?;
     let declared: Vec<Tier> = spec
@@ -145,10 +145,10 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
         .into_iter()
         .filter(|t| *t != Tier::Raw)
         .collect();
-    for (name, ..) in &counts {
-        if !declared.iter().any(|t| spec.relation(*t) == *name) {
+    for (schema, name, ..) in &counts {
+        if schema != spec.schema || !declared.iter().any(|t| spec.relation(*t) == *name) {
             differs(
-                &format!("{}.{name}", spec.schema),
+                &format!("{schema}.{name}"),
                 "count",
                 "none".into(),
                 "a count of the table".into(),
@@ -158,8 +158,9 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
     for tier in declared {
         let relation = spec.relation(tier);
         let qualified = format!("{}.{relation}", spec.schema);
-        let Some((_, materialized_only, hyper_schema, hyper_name)) =
-            counts.iter().find(|(n, ..)| *n == relation)
+        let Some((_, _, materialized_only, hyper_schema, hyper_name)) = counts
+            .iter()
+            .find(|(schema, name, ..)| schema == spec.schema && *name == relation)
         else {
             differs(&qualified, "count", "a count".into(), "none".into());
             continue;
@@ -172,8 +173,8 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
         );
         let columns: Vec<String> = sqlx::query_scalar(
             "SELECT attname::text FROM pg_attribute \
-              WHERE attrelid = (SELECT oid FROM pg_class \
-                                 WHERE relname = $2 AND relnamespace = $1::regnamespace) \
+              WHERE attrelid = (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                                 WHERE c.relname = $2 AND n.nspname = $1) \
                 AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
         )
         .bind(spec.schema)
@@ -247,8 +248,8 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
     for tier in spec.tiers() {
         let relation = spec.relation(tier);
         let view: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM pg_class \
-                             WHERE relname = $2 AND relnamespace = $1::regnamespace AND relkind = 'v')",
+            "SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                             WHERE c.relname = $2 AND n.nspname = $1 AND c.relkind = 'v')",
         )
         .bind(spec.view_schema)
         .bind(&relation)
@@ -283,7 +284,7 @@ struct Store<'a> {
 struct Settings {
     segments: Option<String>,
     orderby: Option<String>,
-    /// Whether the release declares sparse indexes: 2.22 and later.
+    /// Whether the release declares sparse indexes.
     declares_sparse: bool,
     /// The sparse indexes declared, `kind(column)`, comma-separated.
     sparse: Option<String>,
@@ -298,7 +299,7 @@ async fn columnstore(
     store: Store<'_>,
 ) -> Result<(), sqlx::Error> {
     let (schema, name) = store.hypertable;
-    // The sparse indexes are a column of the settings from 2.22 on: read off
+    // The sparse indexes are a column of the settings on later releases: read off
     // the row, so a release without them answers none.
     let settings: Option<Settings> = sqlx::query_as(
         "SELECT s.segmentby AS segments, s.orderby, to_jsonb(s) ? 'index' AS declares_sparse, \
@@ -308,8 +309,8 @@ async fn columnstore(
                         WITH ORDINALITY AS i(e, n) \
                   WHERE e->>'source' = 'config') AS sparse \
            FROM timescaledb_information.hypertable_columnstore_settings s \
-          WHERE s.hypertable = (SELECT oid FROM pg_class \
-                                 WHERE relname = $2 AND relnamespace = $1::regnamespace)::regclass",
+          WHERE s.hypertable = (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                                 WHERE c.relname = $2 AND n.nspname = $1)::regclass",
     )
     .bind(schema)
     .bind(name)
