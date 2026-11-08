@@ -19,10 +19,18 @@ CREATE INDEX "events_kind_at_idx" ON "telemetry"."events" ("kind", "at" DESC, "i
 
 ALTER TABLE "telemetry"."events" SET (
     timescaledb.enable_columnstore,
-    timescaledb.segmentby = '"unit_id"',
+    timescaledb.segmentby = '"unit_id", "kind"',
     timescaledb.orderby = '"at" DESC, "id" DESC'
 );
 CALL add_columnstore_policy('"telemetry"."events"', after => INTERVAL '2 days');
+
+DO $$
+BEGIN
+    IF (regexp_match((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '^(\d+)\.(\d+)'))::int[] >= ARRAY[2, 22] THEN
+        EXECUTE 'ALTER TABLE "telemetry"."events" SET (timescaledb.sparse_index = ''minmax("volume"), bloom("serial")'')';
+    END IF;
+END
+$$;
 
 CREATE MATERIALIZED VIEW "telemetry"."events_hourly"
 WITH (timescaledb.continuous, timescaledb.materialized_only = false) AS

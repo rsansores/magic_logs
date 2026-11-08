@@ -1,0 +1,5 @@
+error: stack names a counted field: a `facet`, the `level`, the `scope` or the `tenant`
+ --> tests/derive/fail/stack_not_counted.rs:5:49
+  |
+5 | #[log(name = "events", schema = "logs", stack = "operator")]
+  |                                                 ^^^^^^^^^^

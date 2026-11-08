@@ -73,17 +73,19 @@
 
 #![warn(missing_docs)]
 
+mod drift;
 mod migration;
 mod query;
 mod spec;
 
+pub use drift::{drift, Drift};
 pub use magic_logs_derive::MagicLog;
 pub use migration::{migration, Governed};
 pub use query::{
-    facets, grouped, histogram, histogram_tier, page, parts, Bucket, Cursor, FacetCount, Filter,
-    Group, Part,
+    facets, grouped, histogram, histogram_by, histogram_tier, page, parts, Bucket, Condition,
+    Cursor, FacetCount, Filter, Group, Part,
 };
-pub use spec::{Column, Field, MagicLog, Spec, Storage, Tier};
+pub use spec::{Column, Field, MagicLog, Sparse, Spec, Storage, Tier};
 
 /// What a filter or a question was refused for.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

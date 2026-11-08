@@ -1,5 +1,25 @@
 pub mod magic_logs
 pub use magic_logs::MagicLog
+pub enum magic_logs::Condition
+pub magic_logs::Condition::AnyOf(alloc::vec::Vec<alloc::string::String>)
+pub magic_logs::Condition::Between
+pub magic_logs::Condition::Between::max: core::option::Option<alloc::string::String>
+pub magic_logs::Condition::Between::min: core::option::Option<alloc::string::String>
+impl core::clone::Clone for magic_logs::Condition
+pub fn magic_logs::Condition::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Condition
+impl core::cmp::PartialEq for magic_logs::Condition
+pub fn magic_logs::Condition::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Condition
+pub fn magic_logs::Condition::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for magic_logs::Condition
+impl core::marker::Freeze for magic_logs::Condition
+impl core::marker::Send for magic_logs::Condition
+impl core::marker::Sync for magic_logs::Condition
+impl core::marker::Unpin for magic_logs::Condition
+impl core::marker::UnsafeUnpin for magic_logs::Condition
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Condition
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Condition
 pub enum magic_logs::Error
 pub magic_logs::Error::FieldTwice(alloc::string::String)
 pub magic_logs::Error::Limit
@@ -24,6 +44,27 @@ impl core::marker::Unpin for magic_logs::Error
 impl core::marker::UnsafeUnpin for magic_logs::Error
 impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Error
 impl core::panic::unwind_safe::UnwindSafe for magic_logs::Error
+pub enum magic_logs::Sparse
+pub magic_logs::Sparse::Bloom
+pub magic_logs::Sparse::MinMax
+impl magic_logs::Sparse
+pub fn magic_logs::Sparse::name(self) -> &'static str
+impl core::clone::Clone for magic_logs::Sparse
+pub fn magic_logs::Sparse::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Sparse
+impl core::cmp::PartialEq for magic_logs::Sparse
+pub fn magic_logs::Sparse::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Sparse
+pub fn magic_logs::Sparse::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for magic_logs::Sparse
+impl core::marker::StructuralPartialEq for magic_logs::Sparse
+impl core::marker::Freeze for magic_logs::Sparse
+impl core::marker::Send for magic_logs::Sparse
+impl core::marker::Sync for magic_logs::Sparse
+impl core::marker::Unpin for magic_logs::Sparse
+impl core::marker::UnsafeUnpin for magic_logs::Sparse
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Sparse
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Sparse
 pub enum magic_logs::Tier
 pub magic_logs::Tier::Daily
 pub magic_logs::Tier::DailyTop
@@ -49,7 +90,7 @@ impl core::panic::unwind_safe::UnwindSafe for magic_logs::Tier
 pub struct magic_logs::Bucket
 pub magic_logs::Bucket::bucket: chrono::datetime::DateTime<chrono::offset::utc::Utc>
 pub magic_logs::Bucket::count: i64
-pub magic_logs::Bucket::level: core::option::Option<alloc::string::String>
+pub magic_logs::Bucket::stack: core::option::Option<alloc::string::String>
 impl core::clone::Clone for magic_logs::Bucket
 pub fn magic_logs::Bucket::clone(&self) -> Self
 impl core::cmp::Eq for magic_logs::Bucket
@@ -102,6 +143,28 @@ impl core::marker::Unpin for magic_logs::Cursor
 impl core::marker::UnsafeUnpin for magic_logs::Cursor
 impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Cursor
 impl core::panic::unwind_safe::UnwindSafe for magic_logs::Cursor
+pub struct magic_logs::Drift
+pub magic_logs::Drift::declared: alloc::string::String
+pub magic_logs::Drift::found: alloc::string::String
+pub magic_logs::Drift::relation: alloc::string::String
+pub magic_logs::Drift::what: alloc::string::String
+impl core::clone::Clone for magic_logs::Drift
+pub fn magic_logs::Drift::clone(&self) -> Self
+impl core::cmp::Eq for magic_logs::Drift
+impl core::cmp::PartialEq for magic_logs::Drift
+pub fn magic_logs::Drift::eq(&self, &Self) -> bool
+impl core::fmt::Debug for magic_logs::Drift
+pub fn magic_logs::Drift::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for magic_logs::Drift
+pub fn magic_logs::Drift::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for magic_logs::Drift
+impl core::marker::Freeze for magic_logs::Drift
+impl core::marker::Send for magic_logs::Drift
+impl core::marker::Sync for magic_logs::Drift
+impl core::marker::Unpin for magic_logs::Drift
+impl core::marker::UnsafeUnpin for magic_logs::Drift
+impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Drift
+impl core::panic::unwind_safe::UnwindSafe for magic_logs::Drift
 pub struct magic_logs::FacetCount
 pub magic_logs::FacetCount::count: i64
 pub magic_logs::FacetCount::field: alloc::string::String
@@ -130,6 +193,7 @@ pub magic_logs::Field::column: magic_logs::Column
 pub magic_logs::Field::counted: bool
 pub magic_logs::Field::indexed: bool
 pub magic_logs::Field::per_top: bool
+pub magic_logs::Field::sparse: core::option::Option<magic_logs::Sparse>
 impl core::clone::Clone for magic_logs::Field
 pub fn magic_logs::Field::clone(&self) -> Self
 impl core::cmp::Eq for magic_logs::Field
@@ -147,7 +211,7 @@ impl core::marker::UnsafeUnpin for magic_logs::Field
 impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Field
 impl core::panic::unwind_safe::UnwindSafe for magic_logs::Field
 pub struct magic_logs::Filter
-pub magic_logs::Filter::fields: alloc::vec::Vec<(alloc::string::String, alloc::vec::Vec<alloc::string::String>)>
+pub magic_logs::Filter::fields: alloc::vec::Vec<(alloc::string::String, magic_logs::Condition)>
 pub magic_logs::Filter::from: chrono::datetime::DateTime<chrono::offset::utc::Utc>
 pub magic_logs::Filter::search: core::option::Option<alloc::string::String>
 pub magic_logs::Filter::to: chrono::datetime::DateTime<chrono::offset::utc::Utc>
@@ -156,6 +220,7 @@ pub fn magic_logs::Filter::check(&self, &magic_logs::Spec) -> core::result::Resu
 pub fn magic_logs::Filter::new(chrono::datetime::DateTime<chrono::offset::utc::Utc>, chrono::datetime::DateTime<chrono::offset::utc::Utc>) -> Self
 pub fn magic_logs::Filter::search(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn magic_logs::Filter::with(self, &str, impl core::iter::traits::collect::IntoIterator<Item = impl core::convert::Into<alloc::string::String>>) -> Self
+pub fn magic_logs::Filter::with_condition(self, &str, magic_logs::Condition) -> Self
 impl core::clone::Clone for magic_logs::Filter
 pub fn magic_logs::Filter::clone(&self) -> Self
 impl core::fmt::Debug for magic_logs::Filter
@@ -243,6 +308,7 @@ pub magic_logs::Spec::schema: &'static str
 pub magic_logs::Spec::scope: core::option::Option<&'static str>
 pub magic_logs::Spec::search: &'static [&'static str]
 pub magic_logs::Spec::search_with: core::option::Option<&'static str>
+pub magic_logs::Spec::stack: core::option::Option<magic_logs::Column>
 pub magic_logs::Spec::storage: magic_logs::Storage
 pub magic_logs::Spec::tenant: core::option::Option<&'static str>
 pub magic_logs::Spec::time: &'static str
@@ -251,6 +317,7 @@ pub magic_logs::Spec::view_schema: &'static str
 impl magic_logs::Spec
 pub fn magic_logs::Spec::counted(&self) -> alloc::vec::Vec<&'static str>
 pub fn magic_logs::Spec::counted_per_top(&self) -> alloc::vec::Vec<&'static str>
+pub fn magic_logs::Spec::counts(&self) -> bool
 pub fn magic_logs::Spec::field(&self, &str) -> core::option::Option<&'static magic_logs::Field>
 pub fn magic_logs::Spec::relation(&self, magic_logs::Tier) -> alloc::string::String
 pub fn magic_logs::Spec::tiers(&self) -> alloc::vec::Vec<magic_logs::Tier>
@@ -269,7 +336,7 @@ impl core::panic::unwind_safe::UnwindSafe for magic_logs::Spec
 pub struct magic_logs::Storage
 pub magic_logs::Storage::chunk: &'static str
 pub magic_logs::Storage::compress_after: &'static str
-pub magic_logs::Storage::segment_by: core::option::Option<&'static str>
+pub magic_logs::Storage::segment_by: &'static [&'static str]
 impl core::clone::Clone for magic_logs::Storage
 pub fn magic_logs::Storage::clone(&self) -> Self
 impl core::cmp::Eq for magic_logs::Storage
@@ -288,10 +355,12 @@ impl core::panic::unwind_safe::RefUnwindSafe for magic_logs::Storage
 impl core::panic::unwind_safe::UnwindSafe for magic_logs::Storage
 pub trait magic_logs::MagicLog
 pub const magic_logs::MagicLog::SPEC: magic_logs::Spec
+pub async fn magic_logs::drift(&mut sqlx_postgres::connection::PgConnection, &magic_logs::Spec) -> core::result::Result<alloc::vec::Vec<magic_logs::Drift>, sqlx_core::error::Error>
 pub fn magic_logs::facets(&magic_logs::Spec, &magic_logs::Filter, &[&str]) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
 pub fn magic_logs::grouped(&magic_logs::Spec, &magic_logs::Filter, &str, i64) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
 pub fn magic_logs::histogram(&magic_logs::Spec, &magic_logs::Filter, chrono::Duration) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
-pub fn magic_logs::histogram_tier(&magic_logs::Spec, &magic_logs::Filter, chrono::Duration) -> magic_logs::Tier
+pub fn magic_logs::histogram_by(&magic_logs::Spec, &magic_logs::Filter, chrono::Duration, core::option::Option<&str>) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
+pub fn magic_logs::histogram_tier(&magic_logs::Spec, &magic_logs::Filter, chrono::Duration, core::option::Option<&str>) -> magic_logs::Tier
 pub fn magic_logs::migration(&magic_logs::Spec, impl core::ops::function::Fn(&magic_logs::Governed<'_>) -> alloc::string::String) -> alloc::string::String
 pub fn magic_logs::page(&magic_logs::Spec, &magic_logs::Filter, core::option::Option<&magic_logs::Cursor>, i64) -> core::result::Result<sqlx_core::query_builder::QueryBuilder<'static, sqlx_postgres::database::Postgres>, magic_logs::Error>
 pub fn magic_logs::parts(&magic_logs::Spec, &magic_logs::Filter, &[&str]) -> alloc::vec::Vec<magic_logs::Part>

@@ -1,0 +1,5 @@
+error: a column keeps one sparse index: `minmax` for ranges, or `bloom` for equality
+  --> tests/derive/fail/minmax_and_bloom.rs:12:9
+   |
+12 |     pub volume: Option<f64>,
+   |         ^^^^^^

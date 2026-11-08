@@ -5,19 +5,34 @@ SELECT * FROM "api"."events" WHERE "at" >= $1 AND "at" < $2 ORDER BY "at" DESC, 
 SELECT * FROM "api"."events" WHERE "at" >= $1 AND "at" < $2 AND "kind" = ANY((SELECT $3::text[])::text[]) AND (f_unaccent("description"::text) ILIKE '%' || replace(replace(replace(f_unaccent($4), '\', '\\'), '%', '\%'), '_', '\_') || '%') AND "at" <= $5 AND ("at", "id") < ($6, $7::uuid) ORDER BY "at" DESC, "id" DESC LIMIT $8;
 
 -- histogram by day: the daily counts
-SELECT time_bucket($1, bucket) AS bucket, "severity"::text AS level, sum(events)::bigint AS count FROM "api"."events_daily" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 GROUP BY 1, 2 ORDER BY 1, 2;
+SELECT time_bucket($1, bucket) AS bucket, "severity"::text AS stack, sum(events)::bigint AS count FROM "api"."events_daily" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 GROUP BY 1, 2 ORDER BY 1, 2;
 
 -- histogram by hour, narrowed to counted fields: the hourly counts
-SELECT time_bucket($1, bucket) AS bucket, "severity"::text AS level, sum(events)::bigint AS count FROM "api"."events_hourly" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 AND "kind" = ANY((SELECT $7::text[])::text[]) AND "severity" = ANY((SELECT $8::severity[])::severity[]) GROUP BY 1, 2 ORDER BY 1, 2;
+SELECT time_bucket($1, bucket) AS bucket, "severity"::text AS stack, sum(events)::bigint AS count FROM "api"."events_hourly" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 AND "kind" = ANY((SELECT $7::text[])::text[]) AND "severity" = ANY((SELECT $8::severity[])::severity[]) GROUP BY 1, 2 ORDER BY 1, 2;
 
 -- histogram by day narrowed to one top: the counts per day and top
-SELECT time_bucket($1, bucket) AS bucket, "severity"::text AS level, sum(events)::bigint AS count FROM "api"."events_daily_unit" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 AND "unit_id" = ANY((SELECT $7::uuid[])::uuid[]) GROUP BY 1, 2 ORDER BY 1, 2;
+SELECT time_bucket($1, bucket) AS bucket, "severity"::text AS stack, sum(events)::bigint AS count FROM "api"."events_daily_unit" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 AND "unit_id" = ANY((SELECT $7::uuid[])::uuid[]) GROUP BY 1, 2 ORDER BY 1, 2;
 
 -- histogram by five minutes: the rows
-SELECT time_bucket($1, "at") AS bucket, "severity"::text AS level, count(*) AS count FROM "api"."events" WHERE "at" >= time_bucket($2, $3) AND "at" < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 GROUP BY 1, 2 ORDER BY 1, 2;
+SELECT time_bucket($1, "at") AS bucket, "severity"::text AS stack, count(*) AS count FROM "api"."events" WHERE "at" >= time_bucket($2, $3) AND "at" < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 GROUP BY 1, 2 ORDER BY 1, 2;
 
 -- histogram narrowed to a field the counts do not keep: the rows
-SELECT time_bucket($1, "at") AS bucket, "severity"::text AS level, count(*) AS count FROM "api"."events" WHERE "at" >= time_bucket($2, $3) AND "at" < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 AND "operator_id" = ANY((SELECT $7::uuid[])::uuid[]) GROUP BY 1, 2 ORDER BY 1, 2;
+SELECT time_bucket($1, "at") AS bucket, "severity"::text AS stack, count(*) AS count FROM "api"."events" WHERE "at" >= time_bucket($2, $3) AND "at" < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 AND "operator_id" = ANY((SELECT $7::uuid[])::uuid[]) GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- page narrowed to a range of a field the counts do not keep: the rows
+SELECT * FROM "api"."events" WHERE "at" >= $1 AND "at" < $2 AND "volume" >= (SELECT $3::double precision) ORDER BY "at" DESC, "id" DESC LIMIT $4;
+
+-- histogram by day, a range of a counted field: the daily counts
+SELECT time_bucket($1, bucket) AS bucket, "severity"::text AS stack, sum(events)::bigint AS count FROM "api"."events_daily" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 AND "kind" >= (SELECT $7::text) AND "kind" <= (SELECT $8::text) GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- histogram by day stacked by another counted field: the daily counts
+SELECT time_bucket($1, bucket) AS bucket, "kind"::text AS stack, sum(events)::bigint AS count FROM "api"."events_daily" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- histogram by day stacked by a field the counts do not keep: the rows
+SELECT time_bucket($1, "at") AS bucket, "operator_id"::text AS stack, count(*) AS count FROM "api"."events" WHERE "at" >= time_bucket($2, $3) AND "at" < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 GROUP BY 1, 2 ORDER BY 1, 2;
+
+-- histogram by day stacked by nothing: the daily counts
+SELECT time_bucket($1, bucket) AS bucket, NULL::text AS stack, sum(events)::bigint AS count FROM "api"."events_daily" WHERE bucket >= time_bucket($2, $3) AND bucket < time_bucket($4, $5 - INTERVAL '1 microsecond') + $6 GROUP BY 1, 2 ORDER BY 1, 2;
 
 -- facets over a week, each under the others' filters
 (SELECT 'severity' AS field, value, sum(n)::bigint AS count FROM (SELECT "severity"::text AS value, sum(events)::bigint AS n FROM "api"."events_daily_unit" WHERE bucket >= $1 AND bucket < $2 AND "kind" = ANY((SELECT $3::text[])::text[]) AND "unit_id" = ANY((SELECT $4::uuid[])::uuid[]) GROUP BY 1) AS parts GROUP BY 2) UNION ALL (SELECT 'kind' AS field, value, sum(n)::bigint AS count FROM (SELECT "kind"::text AS value, sum(events)::bigint AS n FROM "api"."events_daily_unit" WHERE bucket >= $5 AND bucket < $6 AND "unit_id" = ANY((SELECT $7::uuid[])::uuid[]) GROUP BY 1) AS parts GROUP BY 2) UNION ALL (SELECT 'unit_id' AS field, value, sum(n)::bigint AS count FROM (SELECT "unit_id"::text AS value, sum(events)::bigint AS n FROM "api"."events_daily_unit" WHERE bucket >= $8 AND bucket < $9 AND "kind" = ANY((SELECT $10::text[])::text[]) GROUP BY 1) AS parts GROUP BY 2);

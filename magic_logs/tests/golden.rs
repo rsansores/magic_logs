@@ -3,7 +3,10 @@
 //! runs, read in review as SQL. `MAGIC_LOGS_BLESS=1` writes them anew.
 
 use chrono::{DateTime, Duration, TimeZone, Utc};
-use magic_logs::{facets, grouped, histogram, migration, page, Cursor, Filter, Governed, MagicLog};
+use magic_logs::{
+    facets, grouped, histogram, histogram_by, migration, page, Condition, Cursor, Filter, Governed,
+    MagicLog,
+};
 use uuid::Uuid;
 
 #[derive(MagicLog)]
@@ -11,7 +14,7 @@ use uuid::Uuid;
     name = "events",
     schema = "telemetry",
     view_schema = "api",
-    segment_by = "unit_id",
+    segment_by = "unit_id, kind",
     search_with = "f_unaccent"
 )]
 struct Event {
@@ -31,6 +34,10 @@ struct Event {
     unit_id: Uuid,
     #[log(filter)]
     operator_id: Option<Uuid>,
+    #[log(filter, minmax)]
+    volume: Option<f64>,
+    #[log(filter, bloom)]
+    serial: Option<String>,
     #[log(search)]
     description: String,
 }
@@ -47,6 +54,8 @@ fn columns(e: Event) -> impl std::fmt::Debug {
         e.kind,
         e.unit_id,
         e.operator_id,
+        e.volume,
+        e.serial,
         e.description,
     )
 }
@@ -147,6 +156,62 @@ fn queries() -> String {
         .to_owned(),
     );
     add(
+        "page narrowed to a range of a field the counts do not keep: the rows",
+        page(
+            &spec,
+            &week.clone().with_condition(
+                "volume",
+                Condition::Between {
+                    min: Some("1000".into()),
+                    max: None,
+                },
+            ),
+            None,
+            100,
+        )
+        .unwrap()
+        .sql()
+        .to_owned(),
+    );
+    add(
+        "histogram by day, a range of a counted field: the daily counts",
+        histogram(
+            &spec,
+            &week.clone().with_condition(
+                "kind",
+                Condition::Between {
+                    min: Some("a".into()),
+                    max: Some("m".into()),
+                },
+            ),
+            Duration::days(1),
+        )
+        .unwrap()
+        .sql()
+        .to_owned(),
+    );
+    add(
+        "histogram by day stacked by another counted field: the daily counts",
+        histogram_by(&spec, &week, Duration::days(1), Some("kind"))
+            .unwrap()
+            .sql()
+            .to_owned(),
+    );
+    add(
+        "histogram by day stacked by a field the counts do not keep: the rows",
+        histogram_by(&spec, &week, Duration::days(1), Some("operator_id"))
+            .unwrap()
+            .sql()
+            .to_owned(),
+    );
+    add(
+        "histogram by day stacked by nothing: the daily counts",
+        histogram_by(&spec, &week, Duration::days(1), None)
+            .unwrap()
+            .sql()
+            .to_owned(),
+    );
+    add(
         "facets over a week, each under the others' filters",
         facets(
             &spec,
@@ -216,7 +281,8 @@ fn the_migration_is_the_one_checked_in() {
     golden("migration.sql", &migration(&Event::SPEC, govern));
 }
 
-/// A table of a time and an id: counted by its rows alone.
+/// A table of a time and an id: it counts nothing, so it is stored as its
+/// rows alone, with no counts.
 #[derive(MagicLog)]
 #[log(name = "pings", schema = "telemetry")]
 struct Ping {
@@ -227,7 +293,7 @@ struct Ping {
 }
 
 #[test]
-fn the_migration_of_a_table_that_counts_only_its_rows_is_the_one_checked_in() {
+fn the_migration_of_a_table_that_counts_nothing_is_the_one_checked_in() {
     let _ = |p: Ping| (p.id, p.at);
     golden("migration_minimal.sql", &migration(&Ping::SPEC, govern));
 }

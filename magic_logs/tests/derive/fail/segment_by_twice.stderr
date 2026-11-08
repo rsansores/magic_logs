@@ -1,0 +1,5 @@
+error: segment_by names `unit` twice
+ --> tests/derive/fail/segment_by_twice.rs:5:54
+  |
+5 | #[log(name = "events", schema = "logs", segment_by = "unit, unit")]
+  |                                                      ^^^^^^^^^^^^
