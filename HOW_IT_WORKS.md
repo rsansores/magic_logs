@@ -33,8 +33,8 @@ A field's `minmax` or `bloom` is its sparse index: per batch of a
 compressed chunk (a thousand rows of a segment), its least and greatest
 value, or a bloom filter of its values. A filter on the field skips the
 batches that cannot hold a match: a bloom serves a filter of one value on
-every release, and of several (`= ANY`) from 2.31. TimescaleDB declares
-them from 2.22 on; on 2.21 the migration leaves them out, and a chunk keeps
+every release, and of several (`= ANY`) from 2.31. The migration declares
+them from 2.22.1 on; on 2.21 the migration leaves them out, and a chunk keeps
 only those TimescaleDB makes of itself, for a column with an index.
 
 Declaring any replaces those TimescaleDB makes of itself for indexed

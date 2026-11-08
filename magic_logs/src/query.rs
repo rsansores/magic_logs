@@ -629,23 +629,22 @@ pub fn grouped(
     Ok(qb)
 }
 
-/// `sql` without its typmods where the bare type is unbounded: `numeric(15,3)`
-/// is `numeric`, `varchar(3)` is `varchar`, `timestamp(3) with time zone` is
-/// `timestamp with time zone`. Any other is left as it is: a bare `char` is
-/// `char(1)`, a bare `bit` is `bit(1)`.
+/// `sql` as a type that holds any value of it, so a cast cuts and rounds
+/// nothing: without its typmods (`numeric(15,3)` is `numeric`, `varchar(3)`
+/// `varchar`, `timestamp(3) with time zone` `timestamp with time zone`), and
+/// `char(n)` as `bpchar`, `bit(n)` as `varbit` — bare, they hold one. Any
+/// other is left as it is.
 fn bare_type(sql: &str) -> String {
     let stripped = strip_typmods(sql);
     let lower = stripped.to_ascii_lowercase();
     let base = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
-    let unbounded = matches!(
-        base,
-        "numeric" | "decimal" | "varchar" | "character varying"
-    ) || base.starts_with("timestamp")
-        || base.starts_with("time");
-    if unbounded {
-        stripped
-    } else {
-        sql.to_owned()
+    match base {
+        // Bare, these are one character or one bit: their unbounded kin.
+        "char" | "character" | "bpchar" => "bpchar".to_owned(),
+        "bit" | "varbit" | "bit varying" => "varbit".to_owned(),
+        "numeric" | "decimal" | "varchar" | "character varying" | "interval" => stripped,
+        _ if base.starts_with("timestamp") || base.starts_with("time") => stripped,
+        _ => sql.to_owned(),
     }
 }
 
@@ -688,6 +687,8 @@ fn immutable_input(sql: &str) -> bool {
             | "text"
             | "varchar"
             | "character varying"
+            | "bpchar"
+            | "varbit"
             | "uuid"
             | "boolean"
             | "bool"

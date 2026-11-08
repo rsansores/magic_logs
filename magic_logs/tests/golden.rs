@@ -331,3 +331,32 @@ fn a_declared_sparse_index_keeps_timescaledbs_own_but_the_ids() {
     );
     assert!(!sql.contains(r#"("id")"#), "{sql}");
 }
+
+/// A `char(n)` or `bit(n)` filter compares with its value whole: cast to the
+/// unbounded kin, never to one character or bit, nor cut to `n`.
+#[derive(MagicLog)]
+#[log(name = "codes", schema = "telemetry")]
+struct Code {
+    #[log(id)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, sql = "char(3)")]
+    code: String,
+    #[log(filter, sql = "bit(3)")]
+    flags: String,
+}
+
+#[test]
+fn a_bounded_character_or_bit_value_is_compared_whole() {
+    let _ = |c: Code| (c.id, c.at, c.code, c.flags);
+    let filter = Filter::new(day(), day() + Duration::days(1))
+        .with("code", ["abcd"])
+        .with("flags", ["1011", "1"]);
+    let sql = page(&Code::SPEC, &filter, None, 10)
+        .unwrap()
+        .sql()
+        .to_owned();
+    assert!(sql.contains(r#""code" = $3::bpchar"#), "{sql}");
+    assert!(sql.contains(r#""flags" = ANY($4::varbit[])"#), "{sql}");
+}

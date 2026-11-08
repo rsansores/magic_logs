@@ -1510,6 +1510,14 @@ struct Kinds {
     day: String,
     #[log(filter, indexed, sql = "interval")]
     span: String,
+    #[log(filter, indexed, sql = "money")]
+    cost: String,
+    #[log(filter, indexed, sql = "bit(3)")]
+    bits: String,
+    #[log(filter, indexed, sql = "varbit")]
+    vbits: String,
+    #[log(filter, indexed, sql = "tsvector")]
+    words: String,
 }
 
 #[sqlx::test(migrations = false)]
@@ -1517,14 +1525,15 @@ async fn the_sparse_index_redeclared_for_an_indexed_column_is_timescaledbs_own(p
     let _ = |k: Kinds| {
         (
             k.id, k.at, k.small, k.whole, k.big, k.ratio, k.share, k.flag, k.word, k.ref_id,
-            k.seen, k.amount, k.day, k.span,
+            k.seen, k.amount, k.day, k.span, k.cost, k.bits, k.vbits, k.words,
         )
     };
     sqlx::raw_sql(
         "CREATE EXTENSION IF NOT EXISTS timescaledb; CREATE SCHEMA private; \
          CREATE TABLE private.kinds (id uuid NOT NULL, at timestamptz NOT NULL, small smallint, \
              whole integer, big bigint, ratio real, share double precision, flag boolean, word text, \
-             ref_id uuid, seen timestamptz, amount numeric, day date, span interval, PRIMARY KEY (id, at))",
+             ref_id uuid, seen timestamptz, amount numeric, day date, span interval, cost money, \
+             bits bit(3), vbits varbit, words tsvector, PRIMARY KEY (id, at))",
     )
     .execute(&pool)
     .await
@@ -1538,7 +1547,8 @@ async fn the_sparse_index_redeclared_for_an_indexed_column_is_timescaledbs_own(p
         "INSERT INTO private.kinds SELECT gen_random_uuid(), '{start}'::timestamptz + n * interval '1 minute', \
                 n % 100, n, n, n / 7.0, n / 3.0, n % 2 = 0, 'w' || (n % 50), gen_random_uuid(), \
                 '{start}'::timestamptz + n * interval '1 second', n / 10.0, '2026-10-01'::date + n % 9, \
-                n * interval '1 second' FROM generate_series(0, 1439) n; \
+                n * interval '1 second', n::money, (n % 8)::bit(3), (n % 8)::bit(3)::varbit, \
+                to_tsvector('simple', 'w' || n) FROM generate_series(0, 1439) n; \
          SELECT count(compress_chunk(c)) FROM show_chunks('private.kinds') c;",
         start = day().to_rfc3339()
     ))

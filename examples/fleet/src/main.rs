@@ -156,6 +156,31 @@ async fn set_up(pool: &PgPool) -> Result<(), Error> {
             tx.commit().await?;
         }
     }
+    // A view is the columns its table had when it was made: one made before
+    // the odometer is made again, to read it.
+    let stale: bool = sqlx::query_scalar(
+        "SELECT NOT EXISTS (SELECT 1 FROM information_schema.columns \
+          WHERE table_schema = 'api' AND table_name = 'events' AND column_name = 'odometer')",
+    )
+    .fetch_one(pool)
+    .await?;
+    if stale {
+        let spec = Event::SPEC;
+        let mut tx = pool.begin().await?;
+        sqlx::raw_sql("DROP VIEW api.events")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::raw_sql(&govern(&Governed {
+            view_schema: spec.view_schema,
+            view: spec.name,
+            schema: spec.schema,
+            relation: spec.name,
+            scope: spec.scope,
+        }))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+    }
     // A table made by an older build is the one the code declares, or says why not.
     let mut conn = pool.acquire().await?;
     for spec in [Event::SPEC, Position::SPEC] {

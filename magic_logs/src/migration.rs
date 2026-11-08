@@ -134,7 +134,8 @@ pub fn migration(spec: &Spec, govern: impl Fn(&Governed) -> String) -> String {
         literal(st.compress_after)
     ));
     if let Some(sparse) = sparse_index(spec) {
-        // TimescaleDB declares a column's sparse index from 2.22 on; on 2.21
+        // TimescaleDB declares a column's sparse index from 2.22.1 on (2.22.0
+        // is refused above); on 2.21
         // a chunk keeps only those it makes of itself, and `drift` says
         // what is missing once the database runs a release that declares
         // them.
@@ -312,9 +313,10 @@ pub(crate) fn sparse_index(spec: &Spec) -> Option<String> {
 
 /// The sparse index TimescaleDB makes of itself for a column with an index,
 /// as 2.21 to 2.31 make them: `minmax` for a time, a date, a `numeric`, a
-/// `smallint`, a float and a boolean; a bloom filter for the rest (`integer`,
-/// `bigint`, text, a uuid, an enum, an interval). A test holds this to what
-/// the release makes.
+/// `smallint`, a float, a boolean and a type with no hash (`money`, `bit`,
+/// `tsvector`); a bloom filter for the rest (`integer`, `bigint`, text, a
+/// uuid, an enum, an interval). A test holds the common types to what the
+/// release makes.
 fn own_sparse(sql: &str) -> &'static str {
     let lower = sql.trim().to_ascii_lowercase();
     let bare = lower.strip_prefix("pg_catalog.").unwrap_or(&lower);
@@ -337,6 +339,13 @@ fn own_sparse(sql: &str) -> &'static str {
                 | "float"
                 | "boolean"
                 | "bool"
+                // Ordered, with no hash to build a bloom filter of.
+                | "money"
+                | "bit"
+                | "varbit"
+                | "bit varying"
+                | "tsvector"
+                | "\"char\""
         );
     if ordered {
         "minmax"

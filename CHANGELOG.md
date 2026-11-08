@@ -37,12 +37,15 @@ counts.
   by refuses a sparse index until it is no longer a segment column — each
   applying to the chunks compressed from then on. A bloom filter serves a
   filter of one value on every release, and one of several values from 2.31.
+  Declaring any also drops the blooms TimescaleDB makes of several columns of
+  one index, the primary key's among them.
 - A value a filter compares is cast in place, to the column's bare type,
   when that type reads text the same in every session (a number, text, a
   uuid, a boolean), so the filter can run vectorized on compressed batches
   (on 2.31: not for `numeric`); a timestamp's or an enum's is cast once, in
   a sub-select, as before. A typmod of a `numeric`, a `varchar` or a time no
-  longer rounds or cuts a bound: `numeric(15,3)` compares with the value as
+  longer rounds or cuts a bound, and a `char(n)` or `bit(n)` is cast to its
+  unbounded kin: `numeric(15,3)` compares with the value as
   sent. A filter of one value is `=`, of several `= ANY`.
 - **`drift`.** What the database holds, against the declaration: the
   hypertable, its chunks, columnstore and policy, the indexes, every count
@@ -57,7 +60,9 @@ counts.
   prop), were `level` and `levels`. Ranges: `between`, a codec of
   `min..max` either side empty; `Bounds`; `Question.ranges`;
   `useLogExplorer`'s `ranges` option (`RangeOptions`) and its `ranges` and
-  `rangeNames`, cleared by `clear` and counted by `narrowed`.
+  `rangeNames`, cleared by `clear` and counted by `narrowed`;
+  `LogExplorer` and `LogExplorerOptions` take a second type parameter, the
+  ranges' names (`never` when there are none).
 - `examples/fleet`: an odometer filtered by range, the trucks' positions as
   a table that counts nothing, and `drift` at start.
 
