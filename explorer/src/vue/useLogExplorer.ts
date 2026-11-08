@@ -236,8 +236,8 @@ export function useLogExplorer<F extends string, R extends string = never>(
     const held: Record<string, Bounds> = {}
     for (const r of rangeNames) {
       const { min, max } = ranges[r].value
-      if (min !== undefined || max !== undefined)
-        held[r] = { ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}) }
+      // An empty bound is no bound, whatever store held it.
+      if (min || max) held[r] = { ...(min ? { min } : {}), ...(max ? { max } : {}) }
     }
     const text = search.value.trim()
     const next: Question = {

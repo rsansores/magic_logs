@@ -302,3 +302,32 @@ fn the_migration_of_a_table_that_counts_nothing_is_the_one_checked_in() {
 fn every_question_is_the_sql_checked_in() {
     golden("queries.sql", &queries());
 }
+
+/// A sparse index of another column keeps the ones TimescaleDB makes of each
+/// indexed column — a `minmax` of a time, a bloom of any other — but never
+/// of the id or the time, which order every batch.
+#[derive(MagicLog)]
+#[log(name = "marks", schema = "telemetry")]
+struct Mark {
+    #[log(id, filter, indexed)]
+    id: Uuid,
+    #[log(time)]
+    at: DateTime<Utc>,
+    #[log(filter, indexed)]
+    seen_at: Option<DateTime<Utc>>,
+    #[log(filter, indexed)]
+    unit_id: Option<Uuid>,
+    #[log(filter, minmax)]
+    volume: Option<f64>,
+}
+
+#[test]
+fn a_declared_sparse_index_keeps_timescaledbs_own_but_the_ids() {
+    let _ = |m: Mark| (m.id, m.at, m.seen_at, m.unit_id, m.volume);
+    let sql = migration(&Mark::SPEC, govern);
+    assert!(
+        sql.contains(r#"minmax("volume"), minmax("seen_at"), bloom("unit_id")"#),
+        "{sql}"
+    );
+    assert!(!sql.contains(r#"("id")"#), "{sql}");
+}

@@ -363,9 +363,13 @@ fn push_where(
         // A cast from text that is not immutable (to a timestamp, an enum) is
         // no constant to TimescaleDB's filter on compressed chunks, which then
         // refuses it: such values are cast once, in an InitPlan. One that is
-        // (a number, text, a uuid) is cast in place, which keeps the filter
-        // vectorized on compressed batches; an InitPlan's value is not.
-        let sql = field.column.sql;
+        // (a number, text, a uuid) is cast in place, which lets the filter
+        // run vectorized on compressed batches where its type does (not a
+        // `numeric`); an InitPlan's value never does.
+        // Cast to the bare type: a typmod would round a bound (`numeric(15,3)`)
+        // or cut a value short (`varchar(3)`) before it is compared.
+        let bare = bare_type(field.column.sql);
+        let sql = bare.as_str();
         let (open, close) = if immutable_input(sql) {
             ("", "")
         } else {
@@ -616,6 +620,22 @@ pub fn grouped(
     qb.push(") AS parts GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2 LIMIT ");
     qb.push_bind(limit);
     Ok(qb)
+}
+
+/// `sql` without its typmods: `numeric(15,3)` is `numeric`,
+/// `timestamp(3) with time zone` is `timestamp with time zone`.
+fn bare_type(sql: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0;
+    for c in sql.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Whether text is read as `sql` the same way whatever the session's

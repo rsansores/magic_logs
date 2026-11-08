@@ -32,7 +32,10 @@ questions asking about one, segments by the kind too (see
 A field's `minmax` or `bloom` is its sparse index: per batch of a
 compressed chunk (a thousand rows of a segment), its least and greatest
 value, or a bloom filter of its values. A filter on the field skips the
-batches that cannot hold a match. The migration declares them from 2.24 on;
+batches that cannot hold a match. Declaring any replaces those TimescaleDB
+makes of itself for indexed columns, so the migration declares them too: a
+`minmax` of an indexed time or `numeric`, a bloom of any other (the blooms
+it makes of several columns of one index are not kept). TimescaleDB declares them from 2.22 on;
 on 2.21 the migration leaves them out, and a chunk keeps only the ones
 TimescaleDB makes of itself (for a column with an index).
 
@@ -304,9 +307,11 @@ day):
   rows; they settle on their next run.
 - **An interrupted refresh** (a restart, a failover) leaves the buckets of
   its unfinished batch short until the policy's next run or two count
-  them again. On 2.22.0 they stayed short for good, which is one reason the
-  migration refuses it; 2.22 and 2.23 refuse the refresh policy of a
-  count over a count, so the migration refuses them too.
+  them again. On 2.22.0 they stayed short for good, which is why the
+  migration refuses it.
+- **Retuning a refresh** with `alter_job` is refused on 2.22 and 2.23 for
+  a daily count (`multiple refresh policies are not supported for
+  hierarchical continuous aggregates`); 2.21 and 2.24 or later take it.
 - **Retention.** The counts are refreshed over all of history, so a
   refresh after `drop_chunks` on the rows recounts the dropped days from
   nothing: their counts are gone too. Drop rows and counts together
@@ -323,7 +328,7 @@ day):
   inserting.
 - **Upgrading TimescaleDB** (`ALTER EXTENSION timescaledb UPDATE`) keeps
   the policies and their settings, and the counts as they were. A table
-  migrated on 2.21 has no declared sparse indexes; on 2.24 or later,
+  migrated on 2.21 has no declared sparse indexes; on 2.22.1 or later,
   `drift` names them, and `ALTER TABLE … SET (timescaledb.sparse_index =
   …)` declares them for the chunks compressed from then on.
 

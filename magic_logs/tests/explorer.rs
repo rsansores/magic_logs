@@ -36,7 +36,7 @@ struct Event {
     unit_id: Uuid,
     #[log(filter, bloom)]
     operator: Option<String>,
-    #[log(filter, minmax)]
+    #[log(filter, indexed)]
     seen_at: Option<DateTime<Utc>>,
     #[log(search)]
     description: String,
@@ -1331,6 +1331,9 @@ async fn drift_names_every_way_the_database_left_the_declaration(pool: PgPool) {
          ALTER TABLE private.events SET (timescaledb.segmentby = 'zone_id'); \
          {sparse} \
          CALL remove_columnstore_policy('private.events_daily'); \
+         SELECT remove_continuous_aggregate_policy('private.events_hourly'); \
+         SELECT add_continuous_aggregate_policy('private.events_hourly', start_offset => NULL, \
+             end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '5 minutes'); \
          CREATE MATERIALIZED VIEW private.events_weekly WITH (timescaledb.continuous) AS \
              SELECT time_bucket(INTERVAL '7 days', bucket) AS bucket, sum(events) AS events \
                FROM private.events_daily GROUP BY 1 WITH NO DATA; \
@@ -1355,6 +1358,7 @@ async fn drift_names_every_way_the_database_left_the_declaration(pool: PgPool) {
         ("private.events", "index events_kind_at_idx"),
         ("private.events_weekly", "count"),
         ("private.events_daily", "compress_after"),
+        ("private.events_hourly", "refresh"),
         ("public.events_hourly_unit", "view"),
     ];
     if sparse {

@@ -6,11 +6,6 @@ Breaking: a filter field holds a `Condition`, a histogram row's `level` is
 its `stack`, `segment_by` is a list, and a table that counts nothing gets no
 counts.
 
-- **TimescaleDB 2.21, or 2.24 or later.** 2.22 and 2.23 refuse a refresh
-  policy on a count over a count — the daily counts — so 0.1's migration
-  failed there; it now refuses them by name, as it refused 2.22.0. A table
-  already made is unchanged.
-
 - **Ranges.** `Condition::{AnyOf, Between}`: a field is one of some values,
   or between two inclusive bounds, either left out. `Filter::with` is
   `AnyOf`; `Filter::with_condition` takes either. The counts answer a range
@@ -30,19 +25,22 @@ counts.
   several columns (`Storage::segment_by` is a slice). `#[log(minmax)]` and
   `#[log(bloom)]` on a column a filter names are its sparse index
   (`Field::sparse`, `Sparse`), declared by the migration on TimescaleDB
-  2.24 and later, beside a bloom filter of each indexed column, which
-  declaring any would otherwise drop. A table made by 0.1 is unchanged; one
+  2.22.1 and later, beside the sparse index TimescaleDB makes of each
+  indexed column (a `minmax` of a time or a `numeric`, a bloom of any
+  other), which declaring any would otherwise drop. A table made by 0.1 is unchanged; one
   that adds them runs `ALTER TABLE … SET (timescaledb.segmentby = …)` and,
-  on 2.24 and later, `ALTER TABLE … SET (timescaledb.sparse_index = …)` as
+  on 2.22.1 and later, `ALTER TABLE … SET (timescaledb.sparse_index = …)` as
   `drift` and the migration's golden copy spell it, each applying to the
   chunks compressed from then on.
-- A value a filter compares is cast in place when its type reads text the
-  same in every session (a number, text, a uuid, a boolean), so the filter
-  runs vectorized on compressed batches; a timestamp's or an enum's is cast
-  once, in a sub-select, as before.
+- A value a filter compares is cast in place, to the column's bare type,
+  when that type reads text the same in every session (a number, text, a
+  uuid, a boolean), so the filter can run vectorized on compressed batches
+  (on 2.31: not for `numeric`); a timestamp's or an enum's is cast once, in
+  a sub-select, as before. A typmod no longer rounds a bound: `numeric(15,3)`
+  compares with the value as sent.
 - **`drift`.** What the database holds, against the declaration: the
   hypertable, its chunks, columnstore and policy, the indexes, every count
-  with its columns, refresh and columnstore, a count the table should not
+  with its columns, refresh (oldest first included) and columnstore, a count the table should not
   have, and the views. One `Drift` per difference, for a test after a
   host's migrations: a released migration is never edited, so this, not a
   file comparison, is what keeps the database the declaration.

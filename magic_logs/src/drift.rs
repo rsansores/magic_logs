@@ -34,7 +34,7 @@ impl std::fmt::Display for Drift {
 /// Every way the database `conn` reads differs from `spec`, none when it
 /// holds the table as declared: the hypertable and its chunks, the
 /// columnstore and its policy — the segments, the order and, on TimescaleDB
-/// 2.24 and later, the sparse indexes —, the indexes the migration makes,
+/// 2.22 and later, the sparse indexes —, the indexes the migration makes,
 /// every count with its columns, its refresh and its columnstore, a count
 /// over the table, or over one of its counts, that the declaration does not
 /// make — the host's own included —, and a view of every relation in
@@ -188,10 +188,11 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
             columns.join(","),
         );
         let (end, every) = refresh(tier);
-        let policy: Option<(Option<String>, Option<f64>, f64)> = sqlx::query_as(
-            "SELECT config->>'start_offset', \
-                    extract(epoch FROM (config->>'end_offset')::interval)::float8, \
-                    extract(epoch FROM schedule_interval)::float8 \
+        let policy: Option<Refresh> = sqlx::query_as(
+            "SELECT config->>'start_offset' AS start, \
+                    extract(epoch FROM (config->>'end_offset')::interval)::float8 AS end_at, \
+                    extract(epoch FROM schedule_interval)::float8 AS every, \
+                    config->>'refresh_newest_first' AS newest \
                FROM timescaledb_information.jobs \
               WHERE proc_name = 'policy_refresh_continuous_aggregate' \
                 AND hypertable_schema = $1 AND hypertable_name = $2",
@@ -201,16 +202,21 @@ pub async fn drift(conn: &mut PgConnection, spec: &Spec) -> Result<Vec<Drift>, s
         .fetch_optional(&mut *conn)
         .await?;
         let declared = format!(
-            "from the first row, to {}, every {}",
+            "from the first row, to {}, every {}, oldest first",
             interval(seconds(conn, end).await?),
             interval(seconds(conn, every).await?)
         );
-        let held = policy.map_or("none".to_owned(), |(start, end, every)| {
+        let held = policy.map_or("none".to_owned(), |p| {
             format!(
-                "from {}, to {}, every {}",
-                start.unwrap_or_else(|| "the first row".to_owned()),
-                end.map_or("now".to_owned(), interval),
-                interval(every)
+                "from {}, to {}, every {}, {}",
+                p.start.unwrap_or_else(|| "the first row".to_owned()),
+                p.end_at.map_or("now".to_owned(), interval),
+                interval(p.every),
+                if p.newest.as_deref() == Some("false") {
+                    "oldest first"
+                } else {
+                    "newest first"
+                }
             )
         });
         differs(&qualified, "refresh", declared, held);
@@ -277,6 +283,18 @@ struct Store<'a> {
     orderby: String,
     sparse: Option<String>,
     after: &'a str,
+}
+
+/// A count's refresh policy, as its job's config holds it.
+#[derive(sqlx::FromRow)]
+struct Refresh {
+    start: Option<String>,
+    /// `end_offset`, in seconds.
+    end_at: Option<f64>,
+    /// The schedule, in seconds.
+    every: f64,
+    /// `refresh_newest_first`, as text; absent where the release has none.
+    newest: Option<String>,
 }
 
 /// A columnstore's settings, as the catalog holds them.
