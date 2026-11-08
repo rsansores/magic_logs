@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-08
 
 Breaking: a filter field holds a `Condition`, a histogram row's `level` is
 its `stack`, `segment_by` is a list, and a table that counts nothing gets no
